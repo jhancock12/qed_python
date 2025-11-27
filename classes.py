@@ -386,11 +386,14 @@ class ObservableCalculator:
         return total_charge
     
     def particle_n(self, coordinates, circuit, shots = 1024):
-        j = self.lattice.get_index(coordinates[0], coordinates[1])
+        n = self.lattice.get_index(coordinates[0], coordinates[1])
         pn_hamiltonian = Hamiltonian(self.lattice.n_qubits)
         I_term = 'I' * self.lattice.n_qubits
-        Z_term = I_term[:self.lattice.n_gauge_qubits+j] + 'Z' + I_term[self.lattice.n_gauge_qubits+j+1:]
-        
+
+        gauge_string = 'I'*self.lattice.n_dynamical_gauge_qubits
+        fermion_before = 'I'*n
+        fermion_after = 'I'*(self.lattice.n_fermion_qubits - n - 1)
+        Z_term = gauge_string + fermion_before + 'Z' + fermion_after
         coefficient = 1 if (coordinates[0] + coordinates[1]) % 2 == 0 else -1
         pn_hamiltonian.add_term(Z_term, coefficient / 2.0)
       

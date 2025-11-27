@@ -37,11 +37,11 @@ def run_and_print(E_0):
 
     def thetas_only_wrapper(thetas_values):
         cost = qed_vqe(thetas_values, thetas, hamiltonian, circuit, observables, parameters['shots'])
-        print(cost)
+        #print(cost)
         return cost
 
     mini = scipy.optimize.minimize(thetas_only_wrapper, thetas_values, method = "COBYLA")
-    print(mini)
+    #print(mini)
 
     def get_state_counts(thetas_values, thetas, circuit, observables, n_qubits, shots):
         param_dict = dict(zip(thetas, thetas_values))
@@ -49,17 +49,16 @@ def run_and_print(E_0):
 
         return observables.full_z(circuit_values, n_qubits, shots)
 
-    counts = get_state_counts(mini.x, thetas, circuit, observables, n_qubits, 512)
-    print("Counts with shots = 512: ")
-    print(counts)
+    #counts = get_state_counts(mini.x, thetas, circuit, observables, n_qubits, 512)
+    #print("Counts with shots = 512: ")
+    #print(counts)
     param_dict = dict(zip(thetas, mini.x))
     circuit_values = circuit.assign_parameters(param_dict)
-    p_n = observables.particle_number(circuit_values, hamiltonian, parameters['shots'])
+    p_n = observables.particle_number(circuit_values, parameters['shots'])
     print(f"P_n at E_0 = {E_0}: {p_n}")
     return p_n
 
 E_0_values = np.linspace(0.0,20,20)
-E_0_values = [0.0]
 for E_0 in E_0_values:
     print('-'*10)
     _ = run_and_print(E_0)
