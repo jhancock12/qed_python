@@ -11,17 +11,19 @@ from plot_helpers import *
 from QED_hamiltonian import *
 from running_helpers import *
 
+DYNAMICAL_LINKS = [((0,0),1), ((0,0),2), ((1,0),1), ((1,0),2), ((0,1),1), ((1,1),1), ((2,0),2)]
+
 parameters = {
     'L_x': 3,
     'L_y': 2,
     'gauge_truncation': 1,
     'n_fermion_layers' : 1,
-    'shots': 1e6,
+    'shots': 1e5,
     'dynamical_links': DYNAMICAL_LINKS, # hardset atm - will generate some good candidates for different lattices
-    'm': 1.0,
+    'm': 0.5,
     'g': 1.0,
     'a': 1.0,
-    'E_0' : 0.0,
+    'E_0': 0.0,
     'max_iters': 1000,
 }
 
@@ -34,6 +36,8 @@ def run_and_print(E_0):
     thetas_values = [np.random.uniform(0,1)]*total_thetas
 
     hamiltonian = generate_qed_hamiltonian(parameters)
+    
+    print("HAMILTONIAN GENERATED")
 
     def thetas_only_wrapper(thetas_values):
         cost = qed_vqe(thetas_values, thetas, hamiltonian, circuit, observables, parameters['shots'])
@@ -42,7 +46,7 @@ def run_and_print(E_0):
 
     mini = scipy.optimize.minimize(thetas_only_wrapper, thetas_values, method = "COBYLA")
     #print(mini)
-
+    print("VQE RUN")
     def get_state_counts(thetas_values, thetas, circuit, observables, n_qubits, shots):
         param_dict = dict(zip(thetas, thetas_values))
         circuit_values = circuit.assign_parameters(param_dict)
@@ -55,12 +59,13 @@ def run_and_print(E_0):
     param_dict = dict(zip(thetas, mini.x))
     circuit_values = circuit.assign_parameters(param_dict)
     p_n = observables.particle_number(circuit_values, parameters['shots'])
-    print(f"P_n at E_0 = {E_0}: {p_n}")
+    print("OBSERVABLE CALCULATED")
+    print(f"P_n at E_0 = {E_0}: {p_n} <------------")
     return p_n
 
-E_0_values = np.linspace(0.0,20,20)
+E_0_values = np.linspace(0.0,2,20)
 for E_0 in E_0_values:
-    print('-'*10)
+    print('-'*30)
     _ = run_and_print(E_0)
 
 # Okay, now lets look at adding a background electric field

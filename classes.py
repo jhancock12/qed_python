@@ -79,7 +79,12 @@ class Lattice:
         self.qubits_per_gauge = 0 if gauge_truncation == 0 else int(np.ceil(np.log2(2*gauge_truncation+1)))
         self.n_gauge_qubits = self.n_links*self.qubits_per_gauge
     
-        self.n_dynamical_links = self.n_links - (self.n_fermion_qubits - 1)
+        self.optimal_n_dynamical_links = self.n_links - (self.n_fermion_qubits - 1)
+        self.n_dynamical_links = len(self.dynamical_links_list)
+        
+        if self.n_dynamical_links < self.optimal_n_dynamical_links:
+            raise ValueErro(f"This lattice requires at least {self.optimal_n_dynamical_links} dynamical links, you gave: {self.n_dynamical_links}")
+
         self.n_dynamical_gauge_qubits = self.n_dynamical_links*self.qubits_per_gauge
         self.n_qubits = self.n_fermion_qubits + self.n_dynamical_gauge_qubits
 
@@ -405,7 +410,6 @@ class ObservableCalculator:
             for y in range(self.lattice.L_y):
                 p_n += self.particle_n((x, y), circuit, shots)
         return p_n
-
 
     def energy(self, circuit, hamiltonian, shots = 1024):
         return self.measurer.expected_value_hamiltonian(hamiltonian, circuit, shots)

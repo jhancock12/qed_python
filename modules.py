@@ -13,9 +13,6 @@ import matplotlib.pyplot as plt
 # 3x2 : any two links
 # 3x3 : 
 # For now, I will not generalize, and will use the ones that they used
-
-DYNAMICAL_LINKS = [((1,0),2), ((2,0),2)]
-
 NOISELESS_SIMULATOR = qiskit_aer.AerSimulator()
 PAULI_PHASES = {
     'I': {
