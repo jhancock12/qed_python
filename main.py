@@ -29,44 +29,6 @@ parameters = {
 
 print("RUNNING")
 
-def run_and_print(E_0):
-    parameters['E_0'] = E_0
-
-    circuit, observables, thetas, total_thetas, n_qubits = initiate_circuit_observables(parameters)
-    thetas_values = [np.random.uniform(0,1)]*total_thetas
-
-    hamiltonian = generate_qed_hamiltonian(parameters)
-    
-    print("HAMILTONIAN GENERATED")
-
-    def thetas_only_wrapper(thetas_values):
-        cost = qed_vqe(thetas_values, thetas, hamiltonian, circuit, observables, parameters['shots'])
-        #print(cost)
-        return cost
-
-    mini = scipy.optimize.minimize(thetas_only_wrapper, thetas_values, method = "COBYLA")
-    #print(mini)
-    print("VQE RUN")
-    def get_state_counts(thetas_values, thetas, circuit, observables, n_qubits, shots):
-        param_dict = dict(zip(thetas, thetas_values))
-        circuit_values = circuit.assign_parameters(param_dict)
-
-        return observables.full_z(circuit_values, n_qubits, shots)
-
-    #counts = get_state_counts(mini.x, thetas, circuit, observables, n_qubits, 512)
-    #print("Counts with shots = 512: ")
-    #print(counts)
-    param_dict = dict(zip(thetas, mini.x))
-    circuit_values = circuit.assign_parameters(param_dict)
-    p_n = observables.particle_number(circuit_values, parameters['shots'])
-    print("OBSERVABLE CALCULATED")
-    print(f"P_n at E_0 = {E_0}: {p_n} <------------")
-    return p_n
-
-E_0_values = np.linspace(0.0,2,20)
-for E_0 in E_0_values:
-    print('-'*30)
-    _ = run_and_print(E_0)
-
-# Okay, now lets look at adding a background electric field
-# When I try and find this, the best that i can find is just to add a classical field value to the electric terms, i.e., E-> E+e
+E_0_values = np.linspace(0.0, 2, 20)
+# run_and_print_circuit(parameters, E_0_values)
+run_and_print_sparse(parameters, E_0_values)

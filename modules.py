@@ -7,6 +7,7 @@ import copy
 import random
 import scipy
 import matplotlib.pyplot as plt
+import scipy.sparse as spar
 
 # self.n_dynamical_links = self.n_links - (self.n_fermion_qubits - 1)
 # 2x2 : any one link - [[((0,0),1)], [((0,0),2)], [((1,0),2)], [((0,1),1)]]

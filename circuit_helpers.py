@@ -8,8 +8,8 @@ def initiate_circuit_observables(parameters):
     gauge_truncation = parameters['gauge_truncation']
     dynamical_links = parameters['dynamical_links']
     measurer = Measurements()
-    lattice = Lattice(L_x,L_y,gauge_truncation,dynamical_links)
-    observables = ObservableCalculator(lattice,measurer)    
+    lattice = Lattice(L_x, L_y, gauge_truncation, dynamical_links)
+    observables = ObservableCalculator(lattice, measurer)    
     
     builder = CircuitBuilder(lattice.n_fermion_qubits, lattice.n_dynamical_links*lattice.qubits_per_gauge)
     builder.initialize_fermions()

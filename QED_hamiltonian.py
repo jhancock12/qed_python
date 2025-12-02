@@ -324,3 +324,46 @@ def generate_qed_hamiltonian(parameters):
     full_hamiltonian.cleanup()
 
     return full_hamiltonian
+
+def particle_n_hamiltonian(lattice, coordinates):
+    n = lattice.get_index(coordinates[0], coordinates[1])
+    pn_hamiltonian = Hamiltonian(lattice.n_qubits)
+    
+    gauge_string = 'I'*lattice.n_dynamical_gauge_qubits
+    fermion_before = 'I'*n
+    fermion_after = 'I'*(lattice.n_fermion_qubits - n - 1)
+    Z_term = gauge_string + fermion_before + 'Z' + fermion_after
+    coefficient = 1 if (coordinates[0] + coordinates[1]) % 2 == 0 else -1
+    pn_hamiltonian.add_term(Z_term, coefficient / 2.0)
+    
+    return pn_hamiltonian
+
+def particle_number_hamiltonian(lattice):
+    P_n = Hamiltonian(lattice.n_qubits)
+    for x in range(lattice.L_x):
+        for y in range(lattice.L_y):
+            p_n = Hamiltonian(lattice.n_qubits)
+            p_n = particle_n_hamiltonian(lattice, (x, y))
+            P_n.add_hamiltonians(p_n)
+    return P_n
+
+def charge_n_hamiltonian(lattice, coordinates):
+    j = lattice.get_index(coordinates[0], coordinates[1])
+    charge_hamiltonian = Hamiltonian(lattice.n_qubits)
+    I_term = 'I' * lattice.n_qubits
+    Z_term = I_term[:lattice.n_gauge_qubits+j] + 'Z' + I_term[lattice.n_gauge_qubits+j+1:]
+    
+    coefficient = 1 if (coordinates[0] + coordinates[1]) % 2 == 0 else -1
+    charge_hamiltonian.add_term(I_term, coefficient)
+    charge_hamiltonian.add_term(Z_term, -1)
+    
+    return charge_hamiltonian
+    
+def charge_total_hamiltonian(lattice):
+    total_charge = Hamiltonian(lattice.n_qubits)
+    for x in range(lattice.L_x):
+        for y in range(lattice.L_y):
+            charg_n = Hamiltonian(lattice.n_qubits)
+            charg_n = charge_n_hamiltonian(lattice, (x, y))
+            total_charge.add_hamiltonians(charg_n)
+    return total_charge

@@ -83,7 +83,7 @@ class Lattice:
         self.n_dynamical_links = len(self.dynamical_links_list)
         
         if self.n_dynamical_links < self.optimal_n_dynamical_links:
-            raise ValueErro(f"This lattice requires at least {self.optimal_n_dynamical_links} dynamical links, you gave: {self.n_dynamical_links}")
+            raise ValueError(f"This lattice requires at least {self.optimal_n_dynamical_links} dynamical links, you gave: {self.n_dynamical_links}")
 
         self.n_dynamical_gauge_qubits = self.n_dynamical_links*self.qubits_per_gauge
         self.n_qubits = self.n_fermion_qubits + self.n_dynamical_gauge_qubits
@@ -243,6 +243,30 @@ class Hamiltonian:
                 temp_matrix = np.kron(matrix_dict[t], temp_matrix)
             matrix += self.hamiltonian[term]*temp_matrix
         return matrix
+    
+    def to_sparse_matrix(self):
+        
+        I = spar.csc_matrix([[1, 0], [0, 1]], dtype=complex)
+        X = spar.csc_matrix([[0, 1], [1, 0]], dtype=complex)
+        Y = spar.csc_matrix([[0, -1j], [1j, 0]], dtype=complex)
+        Z = spar.csc_matrix([[1, 0], [0, -1]], dtype=complex)
+
+        matrix_dict = {'I': I, 'X': X, 'Y': Y, 'Z': Z}
+
+        # start with a zero sparse matrix
+        dim = 2 ** self.n_qubits
+        H = spar.csc_matrix((dim, dim), dtype=complex)
+
+        for term, coeff in self.hamiltonian.items():
+            # Build kron product for this term
+            temp = spar.csc_matrix([1], dtype=complex)
+
+            for t in term:       # e.g. "XIZY"
+                temp = spar.kron(matrix_dict[t], temp, format='csc')
+
+            H += coeff * temp
+
+        return H
     
     def to_conjugate(self):
         # Of note here, Pauli strings are self-conjugate
