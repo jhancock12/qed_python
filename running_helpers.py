@@ -88,7 +88,7 @@ def run_and_print_sparse(parameters, E_0_values):
     charg_total = charge_total_hamiltonian(lattice)
     # charge_temp = Hamiltonian(lattice.n_qubits)
     # charge_temp.multiply_hamiltonians(charge_temp)
-    # charge_temp.hamiltonian = multiply_hamiltonian_by_constant(charg_total.hamiltonian, 0.0)
+    # charge_temp.hamiltonian = multiply_hamiltonian_by_constant(charg_total.hamiltonian, 10.0)
 
     print("LATTICE AND OBSERVABLE HAMILTONIANS GENERATED")
 
@@ -113,7 +113,7 @@ def run_and_print_sparse(parameters, E_0_values):
         vals, vecs = spar.linalg.eigsh(matrix, k=1)
         groundstate_vec = vecs[:, 0]
         groundstate_eig = vals[0]
-        p_n = np.vdot(groundstate_vec, P_n_matrix @ groundstate_vec) + lattice.n_fermion_qubits / 2.0
+        p_n = np.vdot(groundstate_vec, P_n_matrix @ groundstate_vec)
         total_charge = np.vdot(groundstate_vec, charg_total_matrix @ groundstate_vec)
         E_0 = smart_round(E_0, 5)
         p_n = smart_round(p_n, 5)

@@ -15,21 +15,6 @@ def Es_function(qubits_per_gauge):
         Es["".join(first_string)] = 2**(k)
     return Es
     
-
-def mass_term_n(hamiltonian, lattice, n): 
-    gauge_string = 'I'*lattice.n_dynamical_gauge_qubits
-    fermion_before = 'I'*n
-    fermion_after = 'I'*(lattice.n_fermion_qubits - n - 1)
-
-    coordinates = lattice.get_coordinates(n)
-    term = gauge_string + fermion_before + 'Z' + fermion_after
-    coeff = ((-1)**(coordinates[0] + coordinates[1])) / 2
-
-    hamiltonian.add_term(term, coeff)
-    hamiltonian.add_term('I'*lattice.n_qubits, coeff)
-
-    return hamiltonian
-
 def electric_field_term_n_direction(hamiltonian, lattice, n, direction, dynamical_links):
     index = lattice.labels[n] 
     if (index, direction) in dynamical_links:
@@ -201,6 +186,21 @@ def annihilation_operator_n(hamiltonian, lattice, n):
     hamiltonian.add_term(gauge_string + fermions_before + 'X' + fermions_after, (-1j)**(n-1)/2)
     hamiltonian.add_term(gauge_string + fermions_before + 'Y' + fermions_after, (1j)*(-1j)**(n-1)/2)
     return hamiltonian
+    
+def mass_term_n(hamiltonian, lattice, n): 
+    operator = Hamiltonian(lattice.n_qubits)
+    annihilation_operator = Hamiltonian(lattice.n_qubits)
+    
+    operator = creation_operator_n(hamiltonian, lattice, n)
+    annihilation_operator = creation_operator_n(hamiltonian, lattice, n)
+    operator.multiply_hamiltonians(annihilation_operator)
+    
+    indices = lattice.labels[n]
+    coeff = ((-1)**(indices[0] + indices[1])) / 2
+    operator.hamiltonian = multiply_hamiltonian_by_constant(operator.hamiltonian, coeff)
+    
+    hamiltonian.add_hamiltonians(operator)
+    return hamiltonian
 
 def kinetic_subterm_n(lattice, n, direction, dynamical_links):
     indices = lattice.labels[n]
@@ -319,22 +319,15 @@ def generate_qed_hamiltonian(parameters):
     background_electric_hamiltonian.add_term('I'*lattice.n_qubits, (2*parameters['E_0'] + parameters['E_0']*parameters['E_0']) * (lattice.n_links-len(parameters['dynamical_links']))) # For each of the non-dynamical links
     full_hamiltonian.add_hamiltonians(background_electric_hamiltonian)
     
-    # Do I need to add backgrounds for non-dynamical links? Each of these is set to I, and so I should add (N_{TL}-N_{DL})(2E_0 + E_0^2)?
-    
     full_hamiltonian.cleanup()
 
     return full_hamiltonian
 
-def particle_n_hamiltonian(lattice, coordinates):
-    n = lattice.get_index(coordinates[0], coordinates[1])
+def particle_n_hamiltonian(lattice, indices):
+    n = lattice.get_index(indices[0], indices[1])
     pn_hamiltonian = Hamiltonian(lattice.n_qubits)
     
-    gauge_string = 'I'*lattice.n_dynamical_gauge_qubits
-    fermion_before = 'I'*n
-    fermion_after = 'I'*(lattice.n_fermion_qubits - n - 1)
-    Z_term = gauge_string + fermion_before + 'Z' + fermion_after
-    coefficient = 1 if (coordinates[0] + coordinates[1]) % 2 == 0 else -1
-    pn_hamiltonian.add_term(Z_term, coefficient / 2.0)
+    pn_hamiltonian = mass_term_n(pn_hamiltonian, lattice, n)
     
     return pn_hamiltonian
 
@@ -347,15 +340,16 @@ def particle_number_hamiltonian(lattice):
             P_n.add_hamiltonians(p_n)
     return P_n
 
-def charge_n_hamiltonian(lattice, coordinates):
-    j = lattice.get_index(coordinates[0], coordinates[1])
+# From https://journals.aps.org/prd/pdf/10.1103/PhysRevD.106.114511
+def charge_n_hamiltonian(lattice, indices):
+    j = lattice.get_index(indices[0], indices[1])
     charge_hamiltonian = Hamiltonian(lattice.n_qubits)
     I_term = 'I' * lattice.n_qubits
     Z_term = I_term[:lattice.n_gauge_qubits+j] + 'Z' + I_term[lattice.n_gauge_qubits+j+1:]
     
-    coefficient = 1 if (coordinates[0] + coordinates[1]) % 2 == 0 else -1
-    charge_hamiltonian.add_term(I_term, coefficient)
-    charge_hamiltonian.add_term(Z_term, -1)
+    coefficient = 1 if (indices[0] + indices[1] + 1) % 2 == 0 else -1
+    charge_hamiltonian.add_term(I_term, coefficient / 2.0)
+    charge_hamiltonian.add_term(Z_term, 1 / 2.0)
     
     return charge_hamiltonian
     
