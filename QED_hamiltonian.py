@@ -323,11 +323,15 @@ def generate_qed_hamiltonian(parameters):
 
     return full_hamiltonian
 
+# From: https://www.nature.com/articles/s41467-021-23646-3
 def particle_n_hamiltonian(lattice, indices):
     n = lattice.get_index(indices[0], indices[1])
     pn_hamiltonian = Hamiltonian(lattice.n_qubits)
     
     pn_hamiltonian = mass_term_n(pn_hamiltonian, lattice, n)
+    pn_hamiltonian.hamiltonian = multiply_hamiltonian_by_constant(pn_hamiltonian.hamiltonian, -1)
+    coeff = 1/2*(1 + (-1) ** (indices[0] + indices[1]))
+    pn_hamiltonian.add_term('I'*lattice.n_qubits, coeff)
     
     return pn_hamiltonian
 
@@ -340,7 +344,7 @@ def particle_number_hamiltonian(lattice):
             P_n.add_hamiltonians(p_n)
     return P_n
 
-# From https://journals.aps.org/prd/pdf/10.1103/PhysRevD.106.114511
+# From: https://journals.aps.org/prd/pdf/10.1103/PhysRevD.106.114511
 def charge_n_hamiltonian(lattice, indices):
     j = lattice.get_index(indices[0], indices[1])
     charge_hamiltonian = Hamiltonian(lattice.n_qubits)
