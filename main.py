@@ -19,7 +19,7 @@ parameters = {
     'gauge_truncation': 1,
     'n_fermion_layers' : 1,
     'shots': 1e5,
-    'dynamical_links': DYNAMICAL_LINKS, # hardset atm - will generate some good candidates for different lattices
+    'dynamical_links': DYNAMICAL_LINKS,
     'm': 0.5,
     'g': 1.0,
     'a': 1.0,
