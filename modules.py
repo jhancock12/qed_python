@@ -8,13 +8,25 @@ import random
 import scipy
 import matplotlib.pyplot as plt
 import scipy.sparse as spar
+import argparse
 
 # self.n_dynamical_links = self.n_links - (self.n_fermion_qubits - 1)
 # 2x2 : any one link - [[((0,0),1)], [((0,0),2)], [((1,0),2)], [((0,1),1)]]
 # 3x2 : any two links
 # 3x3 : 
 # For now, I will not generalize, and will use the ones that they used
-NOISELESS_SIMULATOR = qiskit_aer.AerSimulator()
+
+CPU_NOISELESS_SIMULATOR = qiskit_aer.AerSimulator()
+
+GPU_NOISELESS_SIMULATOR = qiskit_aer.AerSimulator(
+    method='statevector',
+    device='GPU',
+    precision='single',
+    shots=0, 
+    max_parallel_threads=1,
+    max_parallel_shots=1024,
+)
+
 PAULI_PHASES = {
     'I': {
         'I': ('I', 1),
