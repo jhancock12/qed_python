@@ -5,196 +5,230 @@ from plot_helpers import *
 from QED_hamiltonian import *
 
 def smart_round(number, dec_places):
-    re = 0.0 if abs(number.real) < 1e-18 else number.real
-    im = 0.0 if abs(number.imag) < 1e-8  else number.imag
+    if isinstance(number, dict):
+        for key in list(number):
+            number[key] = smart_round(number[key], dec_places)
+        return number
+    elif isinstance(number, list) or isinstance(number, np.ndarray):
+        for k in range(len(number)):
+            number[k] = smart_round(number[k], dec_places)
+        return number
+    else:
+        re = 0.0 if abs(number.real) < 1e-8 else number.real
+        im = 0.0 if abs(number.imag) < 1e-8  else number.imag
 
-    re = round(re, dec_places)
-    im = round(im, dec_places)
+        re = round(re, dec_places)
+        im = round(im, dec_places)
 
-    if im == 0.0:
-        return float(re)
-    return complex(re, im)
+        if im == 0.0:
+            return float(re)
+        return complex(re, im)
 
-def static_potential_test(g, parameters):
-    parameters['g'] = g
-
-    circuit, observables, thetas, total_thetas, n_qubits = initiate_circuit_observables(parameters)
-    thetas_values = [np.random.uniform(0,1) for _ in range(len(total_thetas))]
-
-    hamiltonian = generate_qed_hamiltonian(parameters)
-
-    def thetas_only_wrapper(thetas_values):
-        cost = qed_vqe(thetas_values, thetas, hamiltonian, circuit, observables, parameters['shots'])
-        #print(cost)
-        return cost
-
-    mini = scipy.optimize.minimize(thetas_only_wrapper, thetas_values, method = "COBYLA")
-    #print(mini)
-
-    def get_state_counts(thetas_values, thetas, circuit, observables, n_qubits, shots):
-        param_dict = dict(zip(thetas, thetas_values))
-        circuit_values = circuit.assign_parameters(param_dict)
-
-        return observables.full_z(circuit_values, n_qubits, shots)
-
-    counts = get_state_counts(mini.x, thetas, circuit, observables, n_qubits, 512)
-    #print("Counts with shots = 512: ")
-    #print(counts)
-    param_dict = dict(zip(thetas, mini.x))
-    circuit_values = circuit.assign_parameters(param_dict)
-    energy = observables.energy(circuit_values, hamiltonian, parameters['shots'])
-    print(f"Energy at g = {g}: {smart_round(energy, 5)}")
-    return energy
-    
-def run_and_print_circuit(parameters, E_0_values):
-    def run_and_print(E_0):
-        parameters['E_0'] = E_0
-    
-        circuit, observables, thetas, total_thetas, n_qubits = initiate_circuit_observables(parameters)
-        thetas_values = [np.random.uniform(0,1)]*total_thetas
-    
-        hamiltonian = generate_qed_hamiltonian(parameters)
-        
-        print("HAMILTONIAN GENERATED")
-    
-        def thetas_only_wrapper(thetas_values):
-            tok_vqe = time.perf_counter()
-            cost = qed_vqe(thetas_values, thetas, hamiltonian, circuit, observables, parameters['shots'])
-            tik_vqe = time.perf_counter()
-            print("Time for circuit to run:", round(tik_vqe - tok_vqe, 3))
-            return cost
-        
-        tik = time.perf_counter()
-        mini = scipy.optimize.minimize(thetas_only_wrapper, thetas_values, method = "COBYLA")
-        tok = time.perf_counter()
-        
-        
-        print("VQE RUN")
-        print("Time taken:", round(tok - tik, 5))
-        def get_state_counts(thetas_values, thetas, circuit, observables, n_qubits, shots):
-            param_dict = dict(zip(thetas, thetas_values))
-            circuit_values = circuit.assign_parameters(param_dict)
-    
-            return observables.full_z(circuit_values, n_qubits, shots)
-    
-        param_dict = dict(zip(thetas, mini.x))
-        circuit_values = circuit.assign_parameters(param_dict)
-        p_n = observables.particle_number(circuit_values, parameters['shots'])
-        total_charge = observables.charge_total(circuit_values, parameters['shots'])
-        print("OBSERVABLE CALCULATED")
-        print(f"P_n at E_0 = {E_0}: {p_n}")
-        print(f"total_charge at E_0 = {E_0}: {total_charge}")
-        return p_n
-    
-    for E_0 in E_0_values:
-        print('-'*30)
-        run_and_print(E_0)
-
-def run_circuit(parameters, E_0_values):
-    def run_and_print(E_0):
-        parameters['E_0'] = E_0
-    
-        circuit, observables, thetas, total_thetas, n_qubits = initiate_circuit_observables(parameters)
-        thetas_values = [np.random.uniform(0,1) for _ in range(total_thetas)]
-    
-        hamiltonian = generate_qed_hamiltonian(parameters)
-        
-        # print("HAMILTONIAN GENERATED")
-    
-        def thetas_only_wrapper(thetas_values):
-            tok_vqe = time.perf_counter()
-            cost = qed_vqe(thetas_values, thetas, hamiltonian, circuit, observables, parameters['shots'])
-            tik_vqe = time.perf_counter()
-            # print("Time for circuit to run:", round(tik_vqe - tok_vqe, 3))
-            return cost
-        
-        def get_state_counts(thetas_values, thetas, circuit, observables, n_qubits, shots):
-            param_dict = dict(zip(thetas, thetas_values))
-            circuit_values = circuit.assign_parameters(param_dict)
-    
-            return observables.full_z(circuit_values, n_qubits, shots)
-        
-        tik = time.perf_counter()
-        mini = scipy.optimize.minimize(thetas_only_wrapper, thetas_values, method = "COBYLA")
-        tok = time.perf_counter()
-        
-        # print("VQE RUN")
-        print("Time taken:", round(tok - tik, 5))
-        
-        counts = get_state_counts(mini.x, thetas, circuit, observables, n_qubits, 512)
-        print("Final counts:",counts)
-        param_dict = dict(zip(thetas, mini.x))
-        circuit_values = circuit.assign_parameters(param_dict)
-        p_n = observables.particle_number(circuit_values, parameters['shots'])
-        total_charge = observables.charge_total(circuit_values, parameters['shots'])
-        # print("OBSERVABLE CALCULATED")
-        print(f"P_n at E_0 = {E_0}: {p_n}")
-        print(f"total_charge at E_0 = {E_0}: {total_charge}")
-        
-        Z_n = observables.site_z(circuit_values, parameters['shots'])
-        #G_n = observables.site_gauss_law(circuit_values, parameters['shots'])
-        
-        return p_n
-    
-    for E_0 in E_0_values:
-        print('-'*30)
-        run_and_print(E_0)
-
-
-def run_and_print_sparse(parameters, E_0_values):
-    lattice = Lattice(parameters['L_x'], parameters['L_y'], parameters['gauge_truncation'], parameters['dynamical_links'])
-    P_n = particle_number_hamiltonian(lattice)
-    charg_total = charge_total_hamiltonian(lattice)
-    charge_temp = Hamiltonian(lattice.n_qubits)
-    charge_temp.multiply_hamiltonians(charge_temp)
-    charge_temp.hamiltonian = multiply_hamiltonian_by_constant(charg_total.hamiltonian, 10.0)
-
-    print("LATTICE AND OBSERVABLE HAMILTONIANS GENERATED")
-
-    P_n_matrix = P_n.to_sparse_matrix()
-    charg_total_matrix = charg_total.to_sparse_matrix()
-    
-    site_zs = []
-    site_gauss = []
+def electric_field_values(ground_vec, lattice):
+    electric_field_values_dict = {}
     for n in range(lattice.n_fermion_qubits):
-        z_hamil = site_z(lattice, n)
-        site_zs.append(z_hamil.to_sparse_matrix())
-        
-        gauss_hamil = site_gauss_law(lattice, n)
-        site_gauss.append(gauss_hamil.to_sparse_matrix())
+        for direction in lattice.directions[n]:
+            electric_hamiltonian = Hamiltonian(lattice.n_qubits)
+            electric_hamiltonian = electric_field_quadratic_term_n_direction(electric_hamiltonian, lattice, n, direction, lattice.dynamical_links_list)
+            electric_matrix = electric_hamiltonian.to_matrix()
 
-    print("OBSERVABLE MATRICES GENERATED")
+            value = np.vdot(ground_vec, electric_matrix @ ground_vec)
+            electric_field_values_dict[(lattice.labels[n],direction)] = value
+    return electric_field_values_dict
 
-    def run_and_print(E_0):
-        parameters['E_0'] = E_0
+def magnetic_field_values(ground_vec, lattice):
+    magnetic_field_values_dict = {}
+    for n in lattice.plaquettes:
+        magnetic_hamiltonian = Hamiltonian(lattice.n_qubits)
+        magnetic_hamiltonian = magnetic_term_n(magnetic_hamiltonian, lattice, n, lattice.dynamical_links_list)
+        magnetic_matrix = magnetic_hamiltonian.to_matrix()
+        value = np.vdot(ground_vec, magnetic_matrix @ ground_vec)
+        magnetic_field_values_dict[lattice.labels[n]] = value
+    return magnetic_field_values_dict
 
-        hamiltonian = generate_qed_hamiltonian(parameters)
-        
-        # hamiltonian.add_hamiltonians(charge_temp)
+def total_charge(ground_vec, lattice):
+    hamiltonian = charge_total_hamiltonian(lattice)
+    matrix = hamiltonian.to_matrix()
+    return np.vdot(ground_vec, matrix @ ground_vec)
 
-        print("PROBLEM HAMILTONIAN GENERATED")
+def particle_number_values(ground_vec, lattice):
+    particle_number_values_dict = {}
+    total_pn = Hamiltonian(lattice.n_qubits)
+    for x in range(lattice.L_x):
+        for y in range(lattice.L_y):
+            pn_n = particle_n_hamiltonian(lattice, (x, y))
+            pn_n_matrix = pn_n.to_matrix()
+            value = np.vdot(ground_vec, pn_n_matrix @ ground_vec)
+            particle_number_values_dict[(x,y)] = value
 
-        matrix = hamiltonian.to_sparse_matrix()
+    return particle_number_values_dict
 
-        print("PROBLEM MATRIX GENERATED")
+def total_particle_number(ground_vec, lattice):
+    total_pn = Hamiltonian(lattice.n_qubits)
+    for x in range(lattice.L_x):
+        for y in range(lattice.L_y):
+            pn_n = particle_n_hamiltonian(lattice, (x, y))
+            total_pn.add_hamiltonians(pn_n)
+    total_matrix = total_pn.to_matrix()
+    value = np.vdot(ground_vec, total_matrix @ ground_vec)
+    return value
 
-        vals, vecs = spar.linalg.eigsh(matrix, k=1, which='SA')
-        groundstate_vec = vecs[:, 0]
-        groundstate_eig = vals[0]
-        groundstate_vec /= np.linalg.norm(groundstate_vec)
-        p_n = np.vdot(groundstate_vec, P_n_matrix @ groundstate_vec)
-        total_charge = np.vdot(groundstate_vec, charg_total_matrix @ groundstate_vec)
-        E_0 = smart_round(E_0, 5)
-        p_n = smart_round(p_n, 5)
-        total_charge = smart_round(total_charge, 5)
-        print("OBSERVABLES CALCULATED")
-        print(f"P_n at E_0 = {E_0}: {p_n}")
-        print(f"total_charge at E_0 = {E_0}: {total_charge}")
-        for n in range(len(site_zs)):
-            print(f"Site: {n}, Z value: {smart_round(np.vdot(groundstate_vec, site_zs[n] @ groundstate_vec), 5)}")
-            print(f"Site: {n}, Gauss' law value: {smart_round(np.vdot(groundstate_vec, site_gauss[n] @ groundstate_vec), 5)}")
-        return p_n
+def gauss_law_values(ground_vec, lattice):
+    gauss_law_values_dict = {}
+    for x in range(lattice.L_x):
+        for y in range(lattice.L_y):
+            n = lattice.reverse_labels[(x, y)]
+            g_n = gauss_operator_n(lattice, n)
+            g_n_matrix = g_n.to_matrix()
+            value = np.vdot(ground_vec, g_n_matrix @ ground_vec)
+            gauss_law_values_dict[(x,y)] = value
 
-    for E_0 in E_0_values:
-        print('-'*30)
-        run_and_print(E_0)
+    return gauss_law_values_dict
+
+def total_gauss_law(ground_vec, lattice):
+    hamiltonian = gauss_hamiltonian_linear(lattice)
+    matrix = hamiltonian.to_matrix()
+    value = np.vdot(ground_vec, matrix @ ground_vec)
+    return value
+
+def observe_and_print(ground_vec, lattice):
+    electric_field_values_dict = electric_field_values(ground_vec, lattice)
+    magnetic_field_values_dict = magnetic_field_values(ground_vec, lattice)
+    particle_number_value_dict = particle_number_values(ground_vec, lattice)
+    gauss_law_values_dict = gauss_law_values(ground_vec, lattice)
+    _total_particle_number = total_particle_number(ground_vec, lattice)
+    _total_charge = total_charge(ground_vec, lattice)
+    _total_gauss_law = total_gauss_law(ground_vec, lattice)
+
+    electric_field_values_dict = smart_round(electric_field_values_dict, 6)
+    magnetic_field_values_dict = smart_round(magnetic_field_values_dict, 6)
+    particle_number_value_dict = smart_round(particle_number_value_dict, 6)
+    gauss_law_values_dict = smart_round(gauss_law_values_dict, 6)
+    _total_particle_number = smart_round(_total_particle_number, 6)
+    _total_charge = smart_round(_total_charge, 6)
+    _total_gauss_law = smart_round(_total_gauss_law, 6)
+    
+    print("electric_field_values_dict:",electric_field_values_dict)
+    print("magnetic_field_values_dict:",magnetic_field_values_dict)
+    print("particle_number_value_dict:",particle_number_value_dict)
+    print("gauss_law_values_dict (no charges):",gauss_law_values_dict)
+    print("total_charge:",_total_charge)
+    print("total_gauss (with charges):",_total_gauss_law)
+    print("total_particle_number:",_total_particle_number)
+    
+def electric_field_values_sparse(ground_vec, lattice):
+    electric_field_values_dict = {}
+
+    for n in range(lattice.n_fermion_qubits):
+        for direction in lattice.directions[n]:
+            electric_hamiltonian = Hamiltonian(lattice.n_qubits)
+            electric_hamiltonian = electric_field_quadratic_term_n_direction(
+                electric_hamiltonian, lattice, n, direction, lattice.dynamical_links_list
+            )
+
+            electric_matrix = electric_hamiltonian.to_sparse_matrix()
+            value = np.vdot(ground_vec, electric_matrix @ ground_vec)
+
+            electric_field_values_dict[(lattice.labels[n], direction)] = value
+
+    return electric_field_values_dict
+
+def magnetic_field_values_sparse(ground_vec, lattice):
+    magnetic_field_values_dict = {}
+
+    for n in lattice.plaquettes:
+        magnetic_hamiltonian = Hamiltonian(lattice.n_qubits)
+        magnetic_hamiltonian = magnetic_term_n(
+            magnetic_hamiltonian, lattice, n, lattice.dynamical_links_list
+        )
+
+        magnetic_matrix = magnetic_hamiltonian.to_sparse_matrix()
+        value = np.vdot(ground_vec, magnetic_matrix @ ground_vec)
+
+        magnetic_field_values_dict[lattice.labels[n]] = value
+
+    return magnetic_field_values_dict
+
+def total_charge_sparse(ground_vec, lattice):
+    hamiltonian = charge_total_hamiltonian(lattice)
+    matrix = hamiltonian.to_sparse_matrix()
+    return np.vdot(ground_vec, matrix @ ground_vec)
+
+def particle_number_values_sparse(ground_vec, lattice):
+    particle_number_values_dict = {}
+
+    for x in range(lattice.L_x):
+        for y in range(lattice.L_y):
+            pn_n = particle_n_hamiltonian(lattice, (x, y))
+            pn_n_matrix = pn_n.to_sparse_matrix()
+
+            value = np.vdot(ground_vec, pn_n_matrix @ ground_vec)
+            particle_number_values_dict[(x, y)] = value
+
+    return particle_number_values_dict
+
+def total_particle_number_sparse(ground_vec, lattice):
+    total_pn = Hamiltonian(lattice.n_qubits)
+
+    for x in range(lattice.L_x):
+        for y in range(lattice.L_y):
+            pn_n = particle_n_hamiltonian(lattice, (x, y))
+            sign = (-1)**(x+y)
+            pn_n.hamiltonian = multiply_hamiltonian_by_constant(pn_n.hamiltonian, sign)
+            total_pn.add_hamiltonians(pn_n)
+
+    total_matrix = total_pn.to_sparse_matrix()
+    value = np.vdot(ground_vec, total_matrix @ ground_vec)
+
+    return value
+
+def gauss_law_values_sparse(ground_vec, lattice):
+    gauss_law_values_dict = {}
+
+    for x in range(lattice.L_x):
+        for y in range(lattice.L_y):
+            n = lattice.reverse_labels[(x, y)]
+            g_n = gauss_operator_n(lattice, n)
+
+            g_n_matrix = g_n.to_sparse_matrix()
+            value = np.vdot(ground_vec, g_n_matrix @ ground_vec)
+
+            gauss_law_values_dict[(x, y)] = value
+
+    return gauss_law_values_dict
+
+def total_gauss_law_sparse(ground_vec, lattice):
+    hamiltonian = gauss_hamiltonian_linear(lattice)
+    matrix = hamiltonian.to_sparse_matrix()
+    value = np.vdot(ground_vec, matrix @ ground_vec)
+    return value
+
+def observe_and_print_sparse(ground_vec, lattice):
+    electric_field_values_dict = electric_field_values_sparse(ground_vec, lattice)
+    magnetic_field_values_dict = magnetic_field_values_sparse(ground_vec, lattice)
+    particle_number_value_dict = particle_number_values_sparse(ground_vec, lattice)
+    gauss_law_values_dict = gauss_law_values_sparse(ground_vec, lattice)
+
+    # _total_particle_number = total_particle_number_sparse(ground_vec, lattice)
+    _total_particle_number = sum(particle_number_value_dict.values())
+    _total_charge = total_charge_sparse(ground_vec, lattice)
+    _total_gauss_law = total_gauss_law_sparse(ground_vec, lattice)
+
+    electric_field_values_dict = smart_round(electric_field_values_dict, 6)
+    magnetic_field_values_dict = smart_round(magnetic_field_values_dict, 6)
+    particle_number_value_dict = smart_round(particle_number_value_dict, 6)
+    gauss_law_values_dict = smart_round(gauss_law_values_dict, 6)
+
+    _total_particle_number = smart_round(_total_particle_number, 6)
+    _total_charge = smart_round(_total_charge, 6)
+    _total_gauss_law = smart_round(_total_gauss_law, 6)
+
+    print("electric_field_values_dict:", electric_field_values_dict)
+    print("magnetic_field_values_dict:", magnetic_field_values_dict)
+    print("particle_number_value_dict:", particle_number_value_dict)
+    print("gauss_law_values_dict (no charges):", gauss_law_values_dict)
+    print("total_charge:", _total_charge)
+    print("total_gauss (with charges):", _total_gauss_law)
+    print("total_particle_number:", _total_particle_number)
+    
+    return _total_particle_number
