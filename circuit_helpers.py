@@ -23,7 +23,7 @@ def initiate_circuit_observables(parameters, lattice):
     builder.gauge_block(gauge_thetas, parameters['gauge_truncation'])
 
     circuit = builder.build()
-    print(circuit.draw())
+    # print(circuit.draw())
 
     return circuit, observables, thetas, total_thetas, lattice.n_qubits
 
@@ -31,4 +31,5 @@ def qed_vqe(thetas, thetas_values, circuit, hamiltonian, lattice, measurer):
     param_dict = dict(zip(thetas, thetas_values))
     circuit_values = circuit.assign_parameters(param_dict)
     ev = measurer.expected_value_hamiltonian_qed(hamiltonian, circuit_values, lattice, shots = 1024)
+    print("Current ev:",ev)
     return ev

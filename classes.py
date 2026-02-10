@@ -481,7 +481,7 @@ class Measurements_gpu:
         for key in list(counts):
             s = 0
             for k in range(lattice.n_gauge_qubits, len(key)):
-                indices = lattice.labels[k]
+                indices = lattice.labels[k - lattice.n_gauge_qubits]
                 s += (-1)**(indices[0] + indices[1]) * int(key[k])
             if s < 1e-8:
                 new_counts[key] = copy.copy(counts[key])
@@ -490,14 +490,14 @@ class Measurements_gpu:
     def gauge_truncation_filter(self, counts, lattice):
         new_counts = {}
         unacceptable_keys = {
-            2 : '10',
+            2 : '10', # I have checked these
             3 : '100'
             }
         for key in list(counts):
             score = 0
             for n in range(lattice.n_dynamical_links):
-                part = key[n * lattice.n_qubits_per_gauge:(n + 1) * lattice.n_qubits_per_gauge]
-                if part == unacceptable_keys[lattice.n_qubits_per_gauge]:
+                part = key[n * lattice.qubits_per_gauge:(n + 1) * lattice.qubits_per_gauge]
+                if part == unacceptable_keys[lattice.qubits_per_gauge]:
                     score += 1
             if score == 0:
                 new_counts[key] = copy.copy(counts[key])
@@ -534,15 +534,16 @@ class Measurements_gpu:
     def expected_value_hamiltonian_qed(self, hamiltonian, circuit, lattice, shots=1024):
         total = 0
         for pauli_string, coefficient in hamiltonian.hamiltonian.items():
-
             if pauli_string == 'I' * len(pauli_string):
+                # print("Hit an I term")
                 ev = 1.0
             else:
                 counts = self.measure_circuit(circuit, pauli_string, shots)
-                counts = self.zero_charge_counts_filter(counts, lattice)
-                counts = self.gauge_truncation_filter(counts, lattice)
+                # print("counts:",counts)
                 if self.meas_matrix is not None:
                     counts = self.apply_meas_filter(counts)
+                counts = self.zero_charge_counts_filter(counts, lattice)
+                counts = self.gauge_truncation_filter(counts, lattice)
                 ev = self.expected_value_from_counts(counts, pauli_string)
 
             total += coefficient * ev
