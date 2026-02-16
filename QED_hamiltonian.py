@@ -370,6 +370,7 @@ def gauss_operator_n(lattice, n):
     Q = charge_n_hamiltonian(lattice, indices)
     Q.hamiltonian = multiply_hamiltonian_by_constant(Q.hamiltonian, -1.0)
     G.add_hamiltonians(Q)
+    G.cleanup()
     
     return G
 

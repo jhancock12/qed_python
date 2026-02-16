@@ -301,6 +301,16 @@ class Hamiltonian:
             new_hamil[key] = hamil[key].real - 1j*hamil[key].imag
         self.conjugate = new_hamil
         return new_hamil
+        
+    def to_qiskit(self):
+        paulis = []
+        coeffs = []
+    
+        for term, coeff in self.hamiltonian.items():
+            paulis.append(term)
+            coeffs.append(coeff)
+    
+        return qiskit.quantum_info.SparsePauliOp(paulis, coeffs)
 
 class CircuitBuilder:
     def __init__(self, n_fermion_qubits, n_gauge_qubits):
@@ -322,6 +332,18 @@ class CircuitBuilder:
             for _ in range(int(len(qubits_to_use)/2)):
                 counter += 1
         return counter
+        
+    def iSwap_block_calculate_qed(self, lattice, n_fermion_layers):
+        possible_pairs = []
+        for i in range(lattice.n_fermion_qubits):
+            for j in range(i):
+                if i != j:
+                    indices_i = lattice.labels[i]
+                    indices_j = lattice.labels[j]
+                    
+                    if ((indices_i[0] + indices_i[1]) % 2) != ((indices_j[0] + indices_j[1]) % 2):
+                        possible_pairs.append([j,i])
+        return len(possible_pairs)
 
     def iSwap_block(self,thetas_slice):
         total_layers = int(self.n_fermion_qubits / 2)
@@ -331,6 +353,23 @@ class CircuitBuilder:
             for j in range(int(len(qubits_to_use)/2)):
                 self.iSwap(thetas_slice[counter], self.n_gauge_qubits+qubits_to_use[0]+2*j, self.n_gauge_qubits+qubits_to_use[0]+2*j+1)
                 counter += 1
+        self.circuit.barrier()
+        return self
+        
+    def iSwap_block_qed(self, thetas_slice, lattice):
+        possible_pairs = []
+        for i in range(lattice.n_fermion_qubits):
+            for j in range(i):
+                if i != j:
+                    indices_i = lattice.labels[i]
+                    indices_j = lattice.labels[j]
+                    
+                    if ((indices_i[0] + indices_i[1]) % 2) != ((indices_j[0] + indices_j[1]) % 2):
+                        possible_pairs.append([j,i])
+        counter = 0
+        for pair in possible_pairs:
+            self.iSwap(thetas_slice[counter], lattice.n_gauge_qubits+pair[0], lattice.n_gauge_qubits+pair[1])
+            counter += 1
         self.circuit.barrier()
         return self
 
@@ -380,9 +419,11 @@ class CircuitBuilder:
         self.circuit.barrier()
         return self
 
-    def initialize_fermions(self):
-        for k in range(self.n_gauge_qubits // 2, self.n_qubits // 2):
-            self.circuit.x(2*k + 1)
+    def initialize_fermions(self, lattice):
+        for k in range(lattice.n_fermion_qubits):
+            indices = lattice.labels[k]
+            if ((indices[0] + indices[1]) % 2) == 1:
+                self.circuit.x(self.n_gauge_qubits + k)
         self.circuit.barrier()
         return self
     
@@ -480,10 +521,20 @@ class Measurements_gpu:
         new_counts = {}
         for key in list(counts):
             s = 0
-            for k in range(lattice.n_gauge_qubits, len(key)):
-                indices = lattice.labels[k - lattice.n_gauge_qubits]
-                s += (-1)**(indices[0] + indices[1]) * int(key[k])
-            if s < 1e-8:
+            # print("-"*5)
+            for k in range(lattice.n_fermion_qubits):
+                indices = lattice.labels[k]
+                # print("k:",k,"indices:",indices)
+                if ((indices[0] + indices[1]) % 2) == 0:
+                    if key[k + lattice.n_gauge_qubits] == '1':
+                        s += 1
+                elif ((indices[0] + indices[1]) % 2) == 1:
+                    if key[k + lattice.n_gauge_qubits] == '0':
+                        s -= 1
+            
+            # print("sub-state:",key[lattice.n_gauge_qubits:len(key)])
+            # print("s:",s)
+            if s == 0:
                 new_counts[key] = copy.copy(counts[key])
         return new_counts   
     
@@ -504,14 +555,11 @@ class Measurements_gpu:
         return new_counts
 
     # --------- Expectation From Counts ---------
-    def expected_value_from_counts(self, counts, term):
+    def expected_value_from_counts(self, counts):
         total_shots = sum(counts.values())
         ev = 0
         for bitstring, count in counts.items():
-            parity = 1
-            for i, p in enumerate(term):
-                if p != 'I' and bitstring[-1 - i] == '1':
-                    parity *= -1
+            parity = 1 if bitstring.count('1') % 2 == 0 else -1
             ev += parity * count / total_shots
         return ev
 
@@ -526,7 +574,7 @@ class Measurements_gpu:
                 counts = self.measure_circuit(circuit, pauli_string, shots)
                 if self.meas_matrix is not None:
                     counts = self.apply_meas_filter(counts)
-                ev = self.expected_value_from_counts(counts, pauli_string)
+                ev = self.expected_value_from_counts(counts)
 
             total += coefficient * ev
         return total
@@ -542,9 +590,11 @@ class Measurements_gpu:
                 # print("counts:",counts)
                 if self.meas_matrix is not None:
                     counts = self.apply_meas_filter(counts)
-                counts = self.zero_charge_counts_filter(counts, lattice)
-                counts = self.gauge_truncation_filter(counts, lattice)
-                ev = self.expected_value_from_counts(counts, pauli_string)
+                # print("counts_before:", counts)
+                # counts = self.zero_charge_counts_filter(counts, lattice)
+                # counts = self.gauge_truncation_filter(counts, lattice)
+                # print("counts_after:", counts)
+                ev = self.expected_value_from_counts(counts)
 
             total += coefficient * ev
         return total
@@ -739,132 +789,3 @@ def charge_n_hamiltonian(lattice, indices):
     charge_hamiltonian.add_term(I_term, +0.5)
 
     return charge_hamiltonian
-
-
-
-
-# Need to redo this:
-
-class ObservableCalculator:
-    def __init__(self, lattice, measurement_manager):
-        #
-        # Fermion qubits sit on the left end of the circuit
-        #
-        self.lattice = lattice
-        self.measurer = measurement_manager
-
-    def _fermion_qubit_index(self, indices):
-        n = self.lattice.get_index(indices[0], indices[1])
-        return self.lattice.n_dynamical_gauge_qubits + n
-
-    # ============================================================
-    # Existing fermionic observables (unchanged)
-    # ============================================================
-
-    def particle_n(self, indices, circuit, shots=1024):
-        x, y = indices
-        qidx = self._fermion_qubit_index(indices)
-    
-        pn = Hamiltonian(self.lattice.n_qubits)
-        I = 'I' * self.lattice.n_qubits
-        Z = list(I)
-        Z[qidx] = 'Z'
-    
-        pn.add_term(I, +0.5)
-        pn.add_term(''.join(Z), -0.5)
-    
-        n_vac = 1 if ((x + y) % 2 == 1) else 0
-        pn.add_term(I, -n_vac)
-    
-        return self.measurer.expected_value_hamiltonian(pn, circuit, shots)
-
-    def particle_number(self, circuit, shots=1024):
-        total = 0.0
-        for x in range(self.lattice.L_x):
-            for y in range(self.lattice.L_y):
-                total += self.particle_n((x, y), circuit, shots)
-        return total
-
-    def n_n(self, indices, circuit, shots=1024):
-        x, y = indices
-        qidx = self._fermion_qubit_index(indices)
-    
-        pn = Hamiltonian(self.lattice.n_qubits)
-        Z = ['I'] * self.lattice.n_qubits
-        Z[qidx] = 'Z'
-    
-        pn.add_term(''.join(Z), (-1) ** (x + y))
-        return self.measurer.expected_value_hamiltonian(pn, circuit, shots)
-
-    def chiral_condensate(self, circuit, shots=1024):
-        total = 0.0
-        for x in range(self.lattice.L_x):
-            for y in range(self.lattice.L_y):
-                total += self.n_n((x, y), circuit, shots)
-        return total
-
-    def charge_n(self, indices, circuit, shots=1024):
-        x, y = indices
-        qidx = self._fermion_qubit_index(indices)
-    
-        h = Hamiltonian(self.lattice.n_qubits)
-        Z = ['I'] * self.lattice.n_qubits
-        Z[qidx] = 'Z'
-    
-        parity = (-1) ** (x + y)
-        h.add_term(''.join(Z), -0.5 * parity)
-        h.add_term('I' * self.lattice.n_qubits, +0.5)
-    
-        return self.measurer.expected_value_hamiltonian(h, circuit, shots)
-
-    def charge_total(self, circuit, shots=1024):
-        total_charge = 0.0
-        for x in range(self.lattice.L_x):
-            for y in range(self.lattice.L_y):
-                total_charge += self.charge_n((x, y), circuit, shots)
-        return total_charge
-
-    def energy(self, circuit, hamiltonian, shots=1024):
-        return self.measurer.expected_value_hamiltonian(hamiltonian, circuit, shots)
-
-    def electric_field_values(self, circuit, shots=1024):
-        values = {}
-        for n in range(self.lattice.n_fermion_qubits):
-            for direction in self.lattice.directions[n]:
-                h = Hamiltonian(self.lattice.n_qubits)
-                h = electric_field_linear_term_n_direction(h, self.lattice, n, direction, self.lattice.dynamical_links_list)
-                value = self.measurer.expected_value_hamiltonian(h, circuit, shots)
-                values[(self.lattice.labels[n], direction)] = value
-
-        return values
-
-    def magnetic_field_values(self, circuit, shots=1024):
-        values = {}
-        for n in self.lattice.plaquettes:
-            h = Hamiltonian(self.lattice.n_qubits)
-            h = magnetic_term_n(h, self.lattice, n, self.lattice.dynamical_links_list)
-            value = self.measurer.expected_value_hamiltonian(h, circuit, shots)
-            values[self.lattice.labels[n]] = value
-
-        return values
-
-    def particle_number_values(self, circuit, shots=1024):
-        values = {}
-        for x in range(self.lattice.L_x):
-            for y in range(self.lattice.L_y):
-                pn = particle_n_hamiltonian(self.lattice, (x, y))
-                value = self.measurer.expected_value_hamiltonian(pn, circuit, shots)
-                values[(x, y)] = value
-
-        return values
-
-    def gauss_law_values(self, circuit, shots=1024):
-        values = {}
-        for x in range(self.lattice.L_x):
-            for y in range(self.lattice.L_y):
-                n = self.lattice.reverse_labels[(x, y)]
-                g_n = gauss_operator_n(self.lattice, n)
-                value = self.measurer.expected_value_hamiltonian(g_n, circuit, shots)
-                values[(x, y)] = value
-
-        return values
