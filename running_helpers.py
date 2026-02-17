@@ -1,7 +1,5 @@
 from modules import *
 from classes import *
-from circuit_helpers import *
-from plot_helpers import *
 from QED_hamiltonian import *
 
 def smart_round(number, dec_places):
@@ -452,3 +450,215 @@ def observe_and_print_noiseless(thetas, thetas_values, circuit, lattice):
     print("total_particle_number:", total_pn)
 
     return total_pn
+
+def initiate_circuit_observables(parameters, lattice):
+    measurer = Measurements_gpu(parameters['simulator'])
+    builder = CircuitBuilder(lattice.n_fermion_qubits, lattice.n_dynamical_gauge_qubits)
+    
+    builder.initialize_fermions(lattice)
+    
+    n_slice = builder.iSwap_block_calculate_qed(lattice, parameters['n_fermion_layers'])
+    
+    thetas_per_gauge = {2: 2, 
+                        3: 4}
+                        
+    n_gauge_thetas = thetas_per_gauge[lattice.qubits_per_gauge] * lattice.n_dynamical_links
+    n_fermion_thetas = n_slice * parameters['n_fermion_layers']
+    n_extra_thetas = lattice.n_gauge_qubits * parameters['n_extra_layers']
+    
+    total_thetas = n_fermion_thetas + n_gauge_thetas + n_extra_thetas
+    thetas = qiskit.circuit.ParameterVector('θ', total_thetas)
+    fermion_thetas = thetas[:n_fermion_thetas]
+    gauge_thetas = thetas[n_fermion_thetas:n_fermion_thetas + n_gauge_thetas]
+    extra_thetas = thetas[n_fermion_thetas + n_gauge_thetas:]
+    
+    for j in range(parameters['n_fermion_layers']):
+        builder.iSwap_block_qed(fermion_thetas[n_slice*j:n_slice*(j+1)], lattice)
+        
+    builder.gauge_block(gauge_thetas, parameters['gauge_truncation'])
+    
+    for j in range(parameters['n_extra_layers']):
+        builder.R_Y_layer_gauss(extra_thetas[lattice.n_gauge_qubits*j:lattice.n_gauge_qubits*(j+1)])
+        
+    circuit = builder.build()
+    # print(circuit.draw())
+    
+    return circuit, thetas, total_thetas, n_fermion_thetas
+    
+def build_and_draw(parameters, lattice):
+    measurer = Measurements_gpu(parameters['simulator'])
+    builder = CircuitBuilder(lattice.n_fermion_qubits, lattice.n_dynamical_gauge_qubits)
+    
+    builder.initialize_fermions(lattice)
+    
+    n_slice = builder.iSwap_block_calculate_qed(lattice, parameters['n_fermion_layers'])
+    
+    thetas_per_gauge = {2: 2, 
+                        3: 4}
+                        
+    n_gauge_thetas = thetas_per_gauge[lattice.qubits_per_gauge] * lattice.n_dynamical_links
+    n_fermion_thetas = n_slice * parameters['n_fermion_layers']
+    n_extra_thetas = lattice.n_gauge_qubits * parameters['n_extra_layers']
+    
+    total_thetas = n_fermion_thetas + n_gauge_thetas + n_extra_thetas
+    thetas = qiskit.circuit.ParameterVector('θ', total_thetas)
+    fermion_thetas = thetas[:n_fermion_thetas]
+    gauge_thetas = thetas[n_fermion_thetas:n_fermion_thetas + n_gauge_thetas]
+    extra_thetas = thetas[n_fermion_thetas + n_gauge_thetas:]
+    
+    for j in range(parameters['n_fermion_layers']):
+        builder.iSwap_block_qed(fermion_thetas[n_slice*j:n_slice*(j+1)], lattice)
+        
+    builder.gauge_block(gauge_thetas, parameters['gauge_truncation'])
+    
+    for j in range(parameters['n_extra_layers']):
+        builder.R_Y_layer_gauss(extra_thetas[lattice.n_gauge_qubits*j:lattice.n_gauge_qubits*(j+1)])
+        
+    circuit = builder.build()
+    print(circuit.draw())
+    
+    return circuit
+
+
+def qed_vqe(thetas, thetas_values, circuit, hamiltonian, lattice, measurer, shots):
+    param_dict = dict(zip(thetas, thetas_values))
+    circuit_values = circuit.assign_parameters(param_dict)
+    ev = measurer.expected_value_hamiltonian_qed(hamiltonian, circuit_values, lattice, shots)
+    return ev
+    
+def qed_vqe_noiseless(thetas, thetas_values, circuit, hamiltonian, lattice, measurer, shots):
+    param_dict = dict(zip(thetas, thetas_values))
+    circuit_values = circuit.assign_parameters(param_dict)
+
+    # circuit_nom = circuit_values.remove_final_measurements(inplace=False)
+    psi = qiskit.quantum_info.Statevector.from_instruction(circuit_values)
+
+    H_qiskit = hamiltonian.to_qiskit()
+
+    ev = np.real(psi.expectation_value(H_qiskit))
+    return ev
+    
+def qed_vqe_noiseless_vectorized(thetas, thetas_values, circuit, hamiltonian, lattice, measurer, shots):
+    N = len(thetas)
+    param_dict = dict(zip(thetas, thetas_values))
+    psi0 = qiskit.quantum_info.Statevector.from_instruction(circuit.assign_parameters(param_dict))
+    
+    H_qiskit = hamiltonian.to_qiskit()
+    energy = np.real(psi0.expectation_value(H_qiskit))
+    
+    # Parameter-shift gradient
+    shifts = np.pi / 2
+    grads = np.zeros(N)
+    
+    # Shift all parameters "plus" and "minus" in a batched way
+    for k in range(N):
+        thetas_plus  = thetas_values.copy()
+        thetas_minus = thetas_values.copy()
+        thetas_plus[k]  += shifts
+        thetas_minus[k] -= shifts
+        
+        psi_plus  = qiskit.quantum_info.Statevector.from_instruction(circuit.assign_parameters(dict(zip(thetas, thetas_plus))))
+        psi_minus = qiskit.quantum_info.Statevector.from_instruction(circuit.assign_parameters(dict(zip(thetas, thetas_minus))))
+        
+        grads[k] = 0.5 * (np.real(psi_plus.expectation_value(H_qiskit)) - np.real(psi_minus.expectation_value(H_qiskit)))
+    
+    return energy, grads
+
+def full_runner(n_fermion_thetas, n_gauge_thetas, thetas, circuit, hamiltonian, lattice, measurer, parameters, sparse_test = False, noisy = False, diagnostics = False, include_ps = False):
+    if diagnostics: print("Runner called")
+    if sparse_test:
+        print('='*10)
+        H_sparse = hamiltonian.to_sparse_matrix()
+        eig_val, eig_vec = spar.linalg.eigsh(
+            H_sparse,
+            k=1,              # number of eigenvalues
+            which='SA'        # Smallest Algebraic
+        )
+        final_classical_value = eig_val[0]
+        ground_vec = eig_vec[:, 0]
+        print("True groundstate energy:",final_classical_value)
+        observe_and_print_sparse(ground_vec, lattice)
+        print('='*10)
+
+    def full_function(thetas_values):
+        if noisy:
+            cost = qed_vqe(thetas, thetas_values, circuit, hamiltonian, lattice, measurer, parameters['shots'])
+        else:
+            cost = qed_vqe_noiseless(thetas, thetas_values, circuit, hamiltonian, lattice, measurer, parameters['shots'])
+            
+        if diagnostics:
+            print('-'*10)
+            print("Energy:",cost)
+            if noisy:
+                observe_and_print_circuit(thetas, thetas_values, circuit, lattice, measurer, parameters['shots'])
+            else:
+                observe_and_print_noiseless(thetas, thetas_values, circuit, lattice)
+        return cost
+        
+    def parameter_shift_gradient(thetas, thetas_values, circuit, hamiltonian, lattice, measurer, shots):
+        grads = np.array([0.0]*len(thetas_values))
+        for k in range(len(thetas_values)):
+            thetas_plus  = np.array(thetas_values, copy=True)
+            thetas_minus = np.array(thetas_values, copy=True)
+    
+            thetas_plus[k] += np.pi/2 
+            thetas_minus[k] -= np.pi/2
+            
+            if noisy:
+                cost_plus = qed_vqe(thetas, thetas_plus, circuit, hamiltonian, lattice, measurer, shots)
+                cost_minus = qed_vqe(thetas, thetas_minus, circuit, hamiltonian, lattice, measurer, shots)
+            else:
+                cost_plus = qed_vqe_noiseless(thetas, thetas_plus, circuit, hamiltonian, lattice, measurer, shots)
+                cost_minus = qed_vqe_noiseless(thetas, thetas_minus, circuit, hamiltonian, lattice, measurer, shots)
+                
+            grads[k] = 0.5 * (cost_plus - cost_minus)
+        return grads
+    
+    def grad_function(thetas_values):
+        grad = parameter_shift_gradient(thetas, thetas_values, circuit, hamiltonian, lattice, measurer, 2*parameters['shots'])
+        return grad
+        
+    guess = np.random.uniform(-0.08, 0.08, size = len(thetas))
+    mini = scipy.optimize.minimize(
+        fun=full_function,
+        x0=guess,
+        method="COBYLA",
+        options={"maxiter": 2000, "tol": 1e-6}
+    )
+    final_thetas = mini.x
+    final_value = full_function(final_thetas)
+    
+    if include_ps:
+        mini = scipy.optimize.minimize(
+            fun=full_function,
+            jac=grad_function,
+            x0=final_thetas,
+            method="L-BFGS-B",
+            options={"maxiter": 50}
+        )
+        final_final_thetas = mini.x
+        final_quantum_value = full_function(mini.x)
+    else:
+        final_final_thetas = final_thetas
+        final_quantum_value = final_value
+    
+    return final_final_thetas, final_quantum_value
+
+def fuller_runner(parameters, lattice, extra_parameters):
+    if extra_parameters['diagnostics']: print("System initializing")
+    circuit, thetas, total_thetas, n_fermion_thetas = initiate_circuit_observables(parameters, lattice)
+    n_gauge_thetas = total_thetas - n_fermion_thetas
+    
+    measurer = Measurements_gpu(parameters['simulator'], lattice.n_qubits)
+    
+    hamiltonian = generate_qed_hamiltonian(parameters, lattice)
+    
+    thetas_values, energy = full_runner(n_fermion_thetas, n_gauge_thetas, thetas, circuit, hamiltonian, lattice, measurer, parameters, extra_parameters['sparse_test'], extra_parameters['noisy'], extra_parameters['diagnostics'], extra_parameters['include_ps'])
+    
+    # thetas_values, energy = p_s_runner_fast(thetas, circuit, hamiltonian, lattice, measurer, parameters, diagnostics=False)
+    
+    cost = qed_vqe_noiseless(thetas, thetas_values, circuit, hamiltonian, lattice, measurer, parameters['shots'])
+    observe_and_print_noiseless(thetas, thetas_values, circuit, lattice)
+    print("Energy:",cost)
+    
+    return thetas_values, energy

@@ -307,7 +307,7 @@ class Hamiltonian:
         coeffs = []
     
         for term, coeff in self.hamiltonian.items():
-            paulis.append(term)
+            paulis.append(term[::-1])
             coeffs.append(coeff)
     
         return qiskit.quantum_info.SparsePauliOp(paulis, coeffs)
@@ -373,12 +373,32 @@ class CircuitBuilder:
         self.circuit.barrier()
         return self
 
-    def R_Y_layer(self,thetas_slice):
+    def R_Y_layer_fermions(self, thetas_slice):
         start_qubit = self.n_gauge_qubits
-        n_fermion_qubits = len(thetas_slice)
-        for qubit in range(n_fermion_qubits):
+        n_qubits = len(thetas_slice)
+        for qubit in range(n_qubits):
             self.circuit.ry(thetas_slice[qubit], start_qubit + qubit)
-        for qubit in range(n_fermion_qubits - 1):
+        for qubit in range(n_qubits - 1):
+            self.circuit.cx(start_qubit + qubit, start_qubit + qubit + 1)
+        self.circuit.barrier()
+        return self
+    
+    def R_Y_layer_gauss(self, thetas_slice):
+        start_qubit = 0
+        n_qubits = len(thetas_slice)
+        for qubit in range(self.n_gauge_qubits):
+            self.circuit.ry(thetas_slice[qubit], start_qubit + qubit)
+        for qubit in range(self.n_gauge_qubits - 1):
+            self.circuit.cx(start_qubit + qubit, start_qubit + qubit + 1)
+        self.circuit.barrier()
+        return self
+        
+    def R_Y_layer_all(self, thetas_slice):
+        start_qubit = 0
+        n_qubits = len(thetas_slice)
+        for qubit in range(n_qubits):
+            self.circuit.ry(thetas_slice[qubit], start_qubit + qubit)
+        for qubit in range(n_qubits - 1):
             self.circuit.cx(start_qubit + qubit, start_qubit + qubit + 1)
         self.circuit.barrier()
         return self
