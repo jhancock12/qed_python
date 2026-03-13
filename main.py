@@ -8,20 +8,21 @@ from modules import *
 from classes import *
 from running_helpers import *
 from QED_hamiltonian import *
+from my_spsa import *
 
 parameters = {
-    'L_x': 2,
+    'L_x': 3,
     'L_y': 2,
-    'gauge_truncation': 1,
-    'n_fermion_layers': 20,
-    'n_extra_layers': 4,
-    'shots': 5000,
-    'm': 0.5,
-    'g': 1.0,
+    'gauge_truncation': 3,
+    'n_fermion_layers': 2,
+    'n_extra_layers': 0,
+    'shots': 10000,
+    'm': 1.0,
+    'g': 0.3,
     'a': 1.0,
     'E_0': [0.0, 0.0],
-    'dynamical_links': [],
-    'gauss_weight': 1.0, # Enforces Gauss' law
+    'dynamical_links': [((1,0),2), ((2,0),2)],
+    'gauss_weight': 0.0, # Enforces Gauss' law
     'charge_weight': 0.0,
     'simulator': CPU_NOISELESS_SIMULATOR 
 }
@@ -31,66 +32,38 @@ extra_parameters = {
     'noisy': False,
     'diagnostics' : False,
     'print_circuit': False,
-    'include_ps': True
+    'include_ps': False
+    }
+    
+SPSA_parameters = {
+    'max_iters' : 5000,
+    'average_length' : 5,
+    'grad_tol' : 1e-12,
+    'average_tol' : 1e-10,
+    'a' : 1.0,
+    'c' : 0.5,
+    'prints' : False,
+    'diagnostics' : False
     }
 
-print("RUNNING TEST")
-print("parameters:")
-for key in list(parameters):
-    print(key,":",parameters[key])
+print("RUNNING PLAYGROUND")
 
-for key in list(extra_parameters):
-    print(key,":",extra_parameters[key])
-
-parameters['g'] = 0.3
-lattice = Lattice(parameters['L_x'], parameters['L_y'], parameters['gauge_truncation'], parameters['dynamical_links'], charge_site = (), anticharge_site = (), E_0 = [0.0, 0.0])
-
-if extra_parameters['print_circuit']: build_and_draw(parameters, lattice)
-
-print("-"*8)
-print("Circuit-based:")
-thetas, energy_0 = fuller_runner(parameters, lattice, extra_parameters)
-
-hamiltonian = generate_qed_hamiltonian(parameters, lattice)
-H_sparse = hamiltonian.to_sparse_matrix()
-eig_val, eig_vec = spar.linalg.eigsh(
-    H_sparse,
-    k=1,              # number of eigenvalues
-    which='SA'        # Smallest Algebraic
-)
-classical_energy_0 = eig_val[0]
-ground_vec = eig_vec[:, 0]
-print("Matrix-based:")
-observe_and_print_sparse(ground_vec, lattice)
-print("Energy:",classical_energy_0)
-
-
-lattice = Lattice(parameters['L_x'], parameters['L_y'], parameters['gauge_truncation'], parameters['dynamical_links'], charge_site = (0,0), anticharge_site = (1,1), E_0 = [0.0, 0.0])
-gs = []
-gaps = []
-gaps_classical = []
-for g in np.linspace(0.3, 12.0, 10):
-    print("-"*8)
-    print("Circuit-based:")
-    parameters['g'] = g
-    thetas, energy_j = fuller_runner(parameters, lattice, extra_parameters)
-    gs.append(g)
-    gaps.append(energy_j - energy_0)
+def Es_function_pg(qubits_per_gauge):
+    I_string_list = list('I' * qubits_per_gauge)
+    coeff = -0.5
+    Es = {}
     
-    hamiltonian = generate_qed_hamiltonian(parameters, lattice)
-    H_sparse = hamiltonian.to_sparse_matrix()
-    eig_val, eig_vec = spar.linalg.eigsh(
-        H_sparse,
-        k=1,              # number of eigenvalues
-        which='SA'        # Smallest Algebraic
-    )
-    classical_energy_j = eig_val[0]
-    ground_vec = eig_vec[:, 0]
-    print("Matrix-based:")
-    observe_and_print_sparse(ground_vec, lattice)
-    print("Energy:",classical_energy_j)
-    gaps_classical.append(classical_energy_j - classical_energy_0)
+    for k in range(qubits_per_gauge - 1):
+        temp_string = copy.copy(I_string_list)
+        temp_string[k] = 'Z'
+        Es["".join(temp_string)] = coeff * 2**(k)
+        
+    first_string = copy.copy(I_string_list)    
+    first_string[qubits_per_gauge - 1] = 'Z'
+    Es["".join(first_string)] = coeff * (2**(qubits_per_gauge - 1) - 1)
+    return Es
 
-print("gs=",gs)
-print("gaps=",gaps)
-print("gaps_classical=",gaps_classical)
+qubits_per_gauge = int(np.ceil(np.log2(2*parameters['gauge_truncation']+1)))
+hamiltonian = Hamiltonian(qubits_per_gauge)
+hamiltonian.hamiltonian = Es_function_pg(parameters['gauge_truncation'])
+print(hamiltonian.to_matrix())
