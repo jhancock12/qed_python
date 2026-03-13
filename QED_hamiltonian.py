@@ -1,19 +1,4 @@
 from classes import *
-
-def Es_function(qubits_per_gauge):
-    I_string_list = list('I' * qubits_per_gauge)
-    coeff = -0.5
-    Es = {}
-    
-    for k in range(qubits_per_gauge - 1):
-        temp_string = copy.copy(I_string_list)
-        temp_string[k] = 'Z'
-        Es["".join(temp_string)] = coeff * 2**(k)
-        
-    first_string = copy.copy(I_string_list)    
-    first_string[qubits_per_gauge - 1] = 'Z'
-    Es["".join(first_string)] = coeff * (2**(qubits_per_gauge - 1) - 1)
-    return Es
     
 def electric_field_linear_term_n_direction(hamiltonian, lattice, n, direction, dynamical_links):
     # print("Linear EF called")
@@ -25,11 +10,9 @@ def electric_field_linear_term_n_direction(hamiltonian, lattice, n, direction, d
         gauge_before = 'I' * ((link_index) * lattice.qubits_per_gauge)
         gauge_after = 'I' * (lattice.n_dynamical_gauge_qubits - (link_index + 1) * lattice.qubits_per_gauge)
 
-        Es = Es_function(lattice.qubits_per_gauge)
-
-        for key in list(Es.keys()):
+        for key in list(lattice.E_dict):
             term = gauge_before + key + gauge_after + fermion_string
-            coeff = Es[key]
+            coeff = lattice.E_dict[key]
             hamiltonian.add_term(term, coeff)
     else:
         hamiltonian.add_term('I'*lattice.n_qubits, 0)
@@ -37,11 +20,7 @@ def electric_field_linear_term_n_direction(hamiltonian, lattice, n, direction, d
     return hamiltonian
     
 def electric_field_quadratic_term_n_direction(hamiltonian, lattice, n, direction, dynamical_links):
-    # print("Quadratic EF called")
     index = lattice.labels[n]
-    # print("-"*5)
-    # print("dynamical_links:",dynamical_links)
-    # print("(index, direction):",(index, direction))
     if (index, direction) in dynamical_links:
         link_index = lattice.dynamical_link_indexing[(index, direction)]
         fermion_string = 'I' * lattice.n_fermion_qubits
@@ -49,11 +28,9 @@ def electric_field_quadratic_term_n_direction(hamiltonian, lattice, n, direction
         gauge_before = 'I' * ((link_index) * lattice.qubits_per_gauge)
         gauge_after = 'I' * (lattice.n_dynamical_gauge_qubits - (link_index + 1) * lattice.qubits_per_gauge)
 
-        Es = Es_function(lattice.qubits_per_gauge)
-
-        for key in list(Es.keys()):
+        for key in list(lattice.E_dict):
             term = gauge_before + key + gauge_after + fermion_string
-            coeff = Es[key]
+            coeff = lattice.E_dict[key]
             hamiltonian.add_term(term, coeff)
     else:
         hamiltonian.add_term('I'*lattice.n_qubits, 0)
@@ -61,7 +38,6 @@ def electric_field_quadratic_term_n_direction(hamiltonian, lattice, n, direction
     return hamiltonian
 
 def electric_field_term_n(hamiltonian, lattice, n, dynamical_links):
-    # print("EF called")
     for direction in lattice.directions[n]:
         E_temp = Hamiltonian(lattice.n_qubits)
         E_temp = electric_field_quadratic_term_n_direction(E_temp, lattice, n, direction, dynamical_links)
@@ -69,15 +45,13 @@ def electric_field_term_n(hamiltonian, lattice, n, dynamical_links):
     return hamiltonian
 
 def background_electric_field_term_n(hamiltonian, lattice, n, dynamical_links):
-    # print("BEF called")
     E_temp = Hamiltonian(lattice.n_qubits)
     for direction in lattice.directions[n]:
         E_temp = electric_field_linear_term_n_direction(E_temp, lattice, n, direction, dynamical_links)
         hamiltonian.add_hamiltonians(E_temp)
     return hamiltonian
-
+         
 def U_term_n(hamiltonian, lattice, n, direction, dynamical_links): 
-    # print("U called")
     index = lattice.labels[n]
     if (index,direction) in dynamical_links:
         link_index = lattice.dynamical_link_indexing[(index, direction)]
@@ -86,71 +60,16 @@ def U_term_n(hamiltonian, lattice, n, direction, dynamical_links):
 
         gauge_before = 'I' * (link_index * lattice.qubits_per_gauge)
         gauge_after = 'I' * (lattice.n_dynamical_gauge_qubits - (link_index + 1) * lattice.qubits_per_gauge)
-
-        Us = {
-                2: {
-            "XI": 1.0,
-            "XX": 1.0,
-            "YI": -1.0j,
-            "YX": 1.0j
-            },        
         
-                3:  { # This looks so wrong - not using 3 per gauge atm
-            "IIX": 2.0,
-            "IXX": 1.0,
-            "XXX": 1.0,
-            "IYX": 1.0j, 
-            "XYX": 1.0j,
-            "YII": 2.0j,
-            "YXI": 1.0j,
-            "YXX": 1.0j,
-            "YYI": 1.0,
-            "YYX": -1.0
-            },
-            
-                4 : {
-            "IIIX": 4.0,      # 4 X0
-            "IIXX": 2.0,      # 2 X0 X1
-            "IXXX": 1.0,      # X0 X1 X2
-            "XXXX": 1.0,      # X0 X1 X2 X3
-        
-            "IXXY": 1.0j,     # i X0 X1 Y2
-            "XXXY": 1.0j,    # i X0 X1 Y2 X3  (string below is correct)
-        
-            "IIYX": 2.0j,     # i*2 X0 Y1
-            "IXYX": 1.0j,     # i X0 Y1 X2
-            "XXYX": 1.0j,     # i X0 Y1 X2 X3
-        
-            "IYYX": 1.0,      # X0 Y1 Y2
-            "XYYX": 1.0,     # - X0 Y1 Y2 X3
-        
-            "IIIY": 4.0j,     # i*4 Y0
-            "IIXY": 2.0j,     # i*2 Y0 X1
-            "IXXY": 1.0j,     # i Y0 X1 X2
-            "XXXY": 1.0j,    # i Y0 X1 X2 X3 
-        
-            "IXYY": 1.0,      # Y0 X1 Y2
-            "XXYY": -1.0,     # - Y0 X1 Y2 X3
-        
-            "IYYY": 2.0,      # 2 Y0 Y1
-            "IXYY": -1.0,     # - Y0 Y1 X2
-            "XXYY": -1.0,     # - Y0 Y1 X2 X3
-        
-            "IYYY": 1.0j,     # i Y0 Y1 Y2
-            "XYYY": 1.0j      # i Y0 Y1 Y2 X3
-            }
-            }
-        for key in list(Us[lattice.qubits_per_gauge]):
+        for key in list(lattice.U_dict):
             term = gauge_before + key + gauge_after + fermion_string
-            value = Us[lattice.qubits_per_gauge][key]
-            hamiltonian.add_term(term, value*(1/(2**(lattice.qubits_per_gauge-1))))  
-        
+            value = lattice.U_dict[key]
+            hamiltonian.add_term(term, value)       
     else:
         hamiltonian.add_term('I'*lattice.n_qubits, 1.0)
     return hamiltonian
 
 def magnetic_term_n(hamiltonian, lattice, n, dynamical_links):
-    # print("MF called")
     index = lattice.labels[n]
     ns_directions = [
         (lattice.reverse_labels[(index[0],index[1])], 1),
@@ -180,7 +99,6 @@ def magnetic_term_n(hamiltonian, lattice, n, dynamical_links):
     return hamiltonian
 
 def creation_operator_n(hamiltonian, lattice, n):
-    # print("Creation called")
     gauge_string = 'I' * lattice.n_dynamical_gauge_qubits
     fermions_before = 'Z' * n
     fermions_after = 'I' * (lattice.n_fermion_qubits - (n + 1))
@@ -191,7 +109,6 @@ def creation_operator_n(hamiltonian, lattice, n):
     return hamiltonian
 
 def annihilation_operator_n(hamiltonian, lattice, n):
-    # print("Annihilation called")
     gauge_string = 'I' * lattice.n_dynamical_gauge_qubits
     fermions_before = 'Z' * n
     fermions_after = 'I' * (lattice.n_fermion_qubits - (n + 1))
@@ -218,7 +135,6 @@ def mass_term_n(hamiltonian, lattice, n):
     return hamiltonian
 
 def kinetic_subterm_n(lattice, n, direction, dynamical_links):
-    # print("Kinetic subterm called")
     indices = lattice.labels[n]
 
     if direction == 1:
@@ -247,8 +163,6 @@ def kinetic_subterm_n(lattice, n, direction, dynamical_links):
     return hamiltonian
 
 def kinetic_term_n(hamiltonian, lattice, n, dynamical_links):
-    # print("Kinetic called")
-    # This works out from both directions for a given n
     temp_hamiltonian = Hamiltonian(lattice.n_qubits)
     temp_hamiltonian_dagger = Hamiltonian(lattice.n_qubits)
     indices = lattice.labels[n]
@@ -362,7 +276,6 @@ def gauss_operator_n(lattice, n):
             G_in = electric_field_linear_term_n_direction(G_in, lattice, new_n, direction, lattice.dynamical_links_list)
             G.add_hamiltonians(G_in)
             
-        
     indices = lattice.labels[n]
     rho = boundary_flux_at_site(lattice, indices)
     G.add_term('I'*lattice.n_qubits, -rho)
@@ -398,10 +311,10 @@ def gauss_hamiltonian_linear(lattice):
         G = gauss_operator_n(lattice, n)
 
         indices = lattice.labels[n]
-        if indices == lattice.charge_site:
-            G.add_term('I'*lattice.n_qubits, -1.0)
-        if indices == lattice.anticharge_site:
-            G.add_term('I'*lattice.n_qubits, +1.0)
+        #if indices == lattice.charge_site:
+        #    G.add_term('I'*lattice.n_qubits, -1.0)
+        #if indices == lattice.anticharge_site:
+        #    G.add_term('I'*lattice.n_qubits, +1.0)
             
         H.add_hamiltonians(G)
 
@@ -443,6 +356,7 @@ def generate_qed_hamiltonian(parameters, lattice, to_print = False, mass_multi =
     magnetic_hamiltonian_total = Hamiltonian(lattice.n_qubits)
     kinetic_hamiltonian_total = Hamiltonian(lattice.n_qubits)
     BEF_hamiltonian_total = Hamiltonian(lattice.n_qubits)
+    GL_hamiltonian_total = Hamiltonian(lattice.n_qubits)
 
     # =======================================================================================================================
     # Mass term
@@ -454,7 +368,7 @@ def generate_qed_hamiltonian(parameters, lattice, to_print = False, mass_multi =
     mass_hamiltonian_total.hamiltonian = multiply_hamiltonian_by_constant(mass_hamiltonian_total.hamiltonian, mass_coeff)
     mass_hamiltonian_total.cleanup()
     # =======================================================================================================================
-
+    # print("Mass done")
     # =======================================================================================================================
     # Electric field term
     for n in range(lattice.n_fermion_qubits):
@@ -465,7 +379,7 @@ def generate_qed_hamiltonian(parameters, lattice, to_print = False, mass_multi =
     electric_hamiltonian_total.hamiltonian = multiply_hamiltonian_by_constant(electric_hamiltonian_total.hamiltonian, electric_coeff)
     electric_hamiltonian_total.cleanup()
     # =======================================================================================================================
-
+    # print("Ele. done")
     # =======================================================================================================================
     # Magnetic field term
     for n in lattice.plaquettes:
@@ -476,7 +390,7 @@ def generate_qed_hamiltonian(parameters, lattice, to_print = False, mass_multi =
     magnetic_hamiltonian_total.hamiltonian = multiply_hamiltonian_by_constant(magnetic_hamiltonian_total.hamiltonian, magnetic_coeff)
     magnetic_hamiltonian_total.cleanup()
     # =======================================================================================================================
-
+    # print("Mag. done")
     # =======================================================================================================================
     # Kinetic term
     for n in range(lattice.n_fermion_qubits):
@@ -487,8 +401,7 @@ def generate_qed_hamiltonian(parameters, lattice, to_print = False, mass_multi =
     kinetic_hamiltonian_total.hamiltonian = multiply_hamiltonian_by_constant(kinetic_hamiltonian_total.hamiltonian, kinetic_coeff)
     kinetic_hamiltonian_total.cleanup()
     # =======================================================================================================================
-
-    
+    # print("Kin. done")
     # =======================================================================================================================
     # Background electric field term
     for n in range(lattice.n_fermion_qubits):
@@ -501,12 +414,29 @@ def generate_qed_hamiltonian(parameters, lattice, to_print = False, mass_multi =
 
     BEF_hamiltonian_total.cleanup()
     # =======================================================================================================================
+    # print("BEF done")
+    # =======================================================================================================================
+    # Gauss' law electric field term
+    print("lattice.gauss_law_background:",lattice.gauss_law_background)
+    for link in list(lattice.gauss_law_background):
+        n = lattice.reverse_labels[link[0]]
+        direction = link[1]
+        background_electric_hamiltonian = Hamiltonian(lattice.n_qubits)
+        background_electric_hamiltonian = electric_field_linear_term_n_direction(background_electric_hamiltonian, lattice, n, direction, lattice.dynamical_links_list)
+        background_electric_hamiltonian.hamiltonian = multiply_hamiltonian_by_constant(background_electric_hamiltonian.hamiltonian, electric_coeff*2*lattice.gauss_law_background[link])
+        GL_hamiltonian_total.add_term('I'*lattice.n_qubits, electric_coeff*lattice.gauss_law_background[link]*lattice.gauss_law_background[link])
+        GL_hamiltonian_total.add_hamiltonians(background_electric_hamiltonian) 
+
+    GL_hamiltonian_total.cleanup()
+    # =======================================================================================================================
     
+
     full_hamiltonian.add_hamiltonians(mass_hamiltonian_total)
     full_hamiltonian.add_hamiltonians(electric_hamiltonian_total)
     full_hamiltonian.add_hamiltonians(magnetic_hamiltonian_total)
     full_hamiltonian.add_hamiltonians(kinetic_hamiltonian_total)
     full_hamiltonian.add_hamiltonians(BEF_hamiltonian_total)
+    full_hamiltonian.add_hamiltonians(GL_hamiltonian_total)
 
     # Charge penalty term
     _gauss_hamiltonian = gauss_hamiltonian(lattice)

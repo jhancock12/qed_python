@@ -66,6 +66,169 @@ def possible_plaquettes(lattice):
                     plaquette_ns.append(key)
     return plaquette_ns
 
+paulis = {
+    "I": np.eye(2),
+    "X": np.array([[0,1],[1,0]]),
+    "Y": np.array([[0,-1j],[1j,0]]),
+    "Z": np.array([[1,0],[0,-1]])
+}
+
+def pauli_expand(U):
+    n = int(np.log2(U.shape[0]))
+    coeffs = {}
+
+    for labels in itertools.product("IXYZ", repeat=n):
+        P = paulis[labels[0]]
+        for l in labels[1:]:
+            P = np.kron(P, paulis[l])
+
+        c = np.trace(P.conj().T @ U) / (2**n)
+        if abs(c) > 1e-12:
+            coeffs["".join(labels)] = c
+
+    return coeffs
+
+def permutation_unitary(mapping, n):
+    dim = 2**n
+    U = np.zeros((dim, dim), dtype=complex)
+    for k, v in mapping.items():
+        i = int(k, 2)
+        j = int(v, 2)
+        U[j, i] = 1.0
+    return U
+
+def Us_function(qubits_per_gauge):
+    mappings = {2: {
+                    "00": "01",
+                    "01": "11",
+                    "11": "00",
+                    "10": "10"
+                    },
+                3: {
+                    "000": "001",
+                    "001": "010",
+                    "010": "011",
+                    "011": "101",
+                    "101": "111",
+                    "111": "110",
+                    "110": "000",
+                    "100": "100",
+                }
+                }
+    U_matrix = permutation_unitary(mappings[qubits_per_gauge], qubits_per_gauge)
+    coeffs = pauli_expand(U_matrix)
+    return coeffs
+
+def Es_function(qubits_per_gauge):
+    I_string_list = list('I' * qubits_per_gauge)
+    coeff = -0.5
+    Es = {}
+    
+    for k in range(qubits_per_gauge - 1):
+        temp_string = copy.copy(I_string_list)
+        temp_string[k] = 'Z'
+        Es["".join(temp_string)] = coeff * 2**(k)
+        
+    first_string = copy.copy(I_string_list)    
+    first_string[qubits_per_gauge - 1] = 'Z'
+    Es["".join(first_string)] = coeff * (2**(qubits_per_gauge - 1) - 1)
+    return Es
+    
+def compute_background_electric_field(lattice):
+    n_sites = lattice.n_fermion_qubits
+    n_dyn_links = len(lattice.dynamical_links_list)
+
+    # Build A: rows = sites, columns = dynamical links
+    A = np.zeros((n_sites, n_dyn_links))
+    rho = np.zeros(n_sites)
+
+    # Assign charges
+    if lattice.charge_site:
+        rho[lattice.get_index(*lattice.charge_site)] = 1
+    if lattice.anticharge_site:
+        rho[lattice.get_index(*lattice.anticharge_site)] = -1
+
+    # Map links to columns
+    link_to_col = {link: i for i, link in enumerate(lattice.dynamical_links_list)}
+
+    for site_idx in range(n_sites):
+        site = lattice.get_indices(site_idx)
+        x, y = site
+        for direction in [1, 2]:  # 1 = x, 2 = y
+            # Outgoing link
+            link = (site, direction)
+            if link in link_to_col:
+                A[site_idx, link_to_col[link]] += 1
+
+            # Ingoing link (check bounds!)
+            if direction == 1 and x > 0:  # x-direction ingoing
+                neighbor_link = ((x-1, y), 1)
+                if neighbor_link in link_to_col:
+                    A[site_idx, link_to_col[neighbor_link]] -= 1
+            elif direction == 2 and y > 0:  # y-direction ingoing
+                neighbor_link = ((x, y-1), 2)
+                if neighbor_link in link_to_col:
+                    A[site_idx, link_to_col[neighbor_link]] -= 1
+
+    # Solve linear system, minimal norm solution
+    E_dyn = np.linalg.lstsq(A, rho, rcond=None)[0]
+
+    # Fill lattice.gauss_law_background
+    gauss_law_background = {link: E_dyn[i] for link, i in link_to_col.items()}
+
+    return gauss_law_background
+
+def compute_string_background(lattice):
+    """
+    Compute a background electric field forming a string between
+    the static charge and anticharge, restricted to allowed dynamical links.
+    """
+    E_bg = {link: 0.0 for link in lattice.dynamical_links_list}
+
+    # Example: naive Manhattan path from charge to anticharge
+    charge = lattice.charge_site
+    anticharge = lattice.anticharge_site
+    x0, y0 = charge
+    x1, y1 = anticharge
+
+    path_links = []
+
+    # move in x first
+    x = x0
+    while x != x1:
+        dx = 1 if x1 > x else -1
+        next_site = (x+dx, y0)
+        # check if vertical or horizontal link is dynamical
+        link_h = ((x, y0), 1)  # horizontal link
+        link_v = ((x, y0), 2)  # vertical link
+        # pick dynamical link along the path if exists
+        if link_h in lattice.dynamical_links_list:
+            path_links.append(link_h)
+        elif link_v in lattice.dynamical_links_list:
+            path_links.append(link_v)
+        x += dx
+
+    # move in y next
+    y = y0
+    while y != y1:
+        dy = 1 if y1 > y else -1
+        next_site = (x1, y+dy)
+        link_h = ((x1, y), 1)
+        link_v = ((x1, y), 2)
+        if link_v in lattice.dynamical_links_list:
+            path_links.append(link_v)
+        elif link_h in lattice.dynamical_links_list:
+            path_links.append(link_h)
+        y += dy
+
+    # assign +1 along the path
+    for link in path_links:
+        if link in E_bg:
+            E_bg[link] = 1.0
+
+    return E_bg
+
+
 class Lattice:
     def __init__(self, L_x, L_y, gauge_truncation, dynamical_links_list, charge_site = (), anticharge_site = (), E_0 = [0.0, 0.0]):
         if L_x*L_y % 2 == 1:
@@ -110,10 +273,27 @@ class Lattice:
             print(f"This lattice requires at least {self.optimal_n_dynamical_links} dynamical links, you gave: {self.n_dynamical_links}")
 
         self.n_dynamical_gauge_qubits = self.n_dynamical_links*self.qubits_per_gauge
+        self.n_gauge_qubits = self.n_dynamical_links*self.qubits_per_gauge
         self.n_qubits = self.n_fermion_qubits + self.n_dynamical_gauge_qubits
         
         self.directions, self.link_indexing, self.dynamical_link_indexing = possible_directions(self)
         self.plaquettes = possible_plaquettes(self)
+
+        self.U_dict = Us_function(self.qubits_per_gauge)
+        self.E_dict = Es_function(self.qubits_per_gauge)
+        
+        ingoing_links = {}
+        for n in range(self.n_fermion_qubits):
+            ingoing_links[n] = []
+            indices = self.labels[n]
+            for direction in [1,2]:
+                if direction == 1: new_indices = (indices[0] - 1, indices[1])
+                elif direction == 2: new_indices = (indices[0], indices[1] - 1)
+                if new_indices in list(self.reverse_labels):
+                    ingoing_links[n].append(direction)
+        self.directions_ingoing = ingoing_links
+        
+        self.gauss_law_background = compute_string_background(self)
 
     def get_index(self, x, y):
         if (x, y) in self.reverse_labels:
@@ -141,6 +321,8 @@ class Hamiltonian:
     def latex_print(self):
         keys = list(self.hamiltonian)
         string_to_print = ""
+        # hamiltonian = smart_round(hamiltonian, 5)
+        counter  = 0
         for key in keys:
             matrix_list = list(key)
             if matrix_list == ['I']*len(matrix_list):
@@ -155,12 +337,16 @@ class Hamiltonian:
                     string_to_print += r" - " + str(abs(self.hamiltonian[key])) + " " + temp_string
                 else:
                     string_to_print += r" + " + str(abs(self.hamiltonian[key])) + " " + temp_string
+                counter += 1
+                if (counter % 4) == 0:
+                    string_to_print += r"\\ &"
         print(string_to_print)
 
     def latex_plot(self, save=False):
         keys = list(self.hamiltonian)
         string_to_print = "H = &"
         counter = 0
+        # self.hamiltonian = smart_round(self.hamiltonian, 5)
         for key in keys:
             matrix_list = list(key)
             if matrix_list == ['I']*len(matrix_list):
@@ -607,7 +793,7 @@ class Measurements_gpu:
                 ev = 1.0
             else:
                 counts = self.measure_circuit(circuit, pauli_string, shots)
-                # print("counts:",counts)
+                # print("-"*5)
                 if self.meas_matrix is not None:
                     counts = self.apply_meas_filter(counts)
                 # print("counts_before:", counts)

@@ -11,6 +11,7 @@ import scipy.sparse as spar
 import argparse
 import statsmodels.api as sm
 from scipy.sparse.linalg import eigsh
+import itertools
 
 # self.n_dynamical_links = self.n_links - (self.n_fermion_qubits - 1)
 # 2x2 : any one link - [[((0,0),1)], [((0,0),2)], [((1,0),2)], [((0,1),1)]]
@@ -55,3 +56,23 @@ PAULI_PHASES = {
         'Z': ('I', 1),
     },
 }
+
+def smart_round(number, dec_places):
+    if isinstance(number, dict):
+        for key in list(number):
+            number[key] = smart_round(number[key], dec_places)
+        return number
+    elif isinstance(number, list) or isinstance(number, np.ndarray):
+        for k in range(len(number)):
+            number[k] = smart_round(number[k], dec_places)
+        return number
+    else:
+        re = 0.0 if abs(number.real) < 1e-8 else number.real
+        im = 0.0 if abs(number.imag) < 1e-8  else number.imag
+
+        re = round(re, dec_places)
+        im = round(im, dec_places)
+
+        if im == 0.0:
+            return float(re)
+        return complex(re, im)

@@ -2,25 +2,36 @@ from modules import *
 from classes import *
 from QED_hamiltonian import *
 
-def smart_round(number, dec_places):
-    if isinstance(number, dict):
-        for key in list(number):
-            number[key] = smart_round(number[key], dec_places)
-        return number
-    elif isinstance(number, list) or isinstance(number, np.ndarray):
-        for k in range(len(number)):
-            number[k] = smart_round(number[k], dec_places)
-        return number
-    else:
-        re = 0.0 if abs(number.real) < 1e-8 else number.real
-        im = 0.0 if abs(number.imag) < 1e-8  else number.imag
+def vector_maker(bitstring):
+    zero = np.array([1,0])
+    one = np.array([0,1])
 
-        re = round(re, dec_places)
-        im = round(im, dec_places)
+    vec = np.array([1])
 
-        if im == 0.0:
-            return float(re)
-        return complex(re, im)
+    for b in bitstring:
+        if b == '1':
+            term = copy.copy(one)
+        elif b == '0':
+            term = copy.copy(zero)
+        vec = np.kron(term, vec)
+
+    return vec
+
+def which_string(vec, tol=1e-12):
+    idx = np.argmax(np.abs(vec))
+    if not np.isclose(np.abs(vec[idx]), 1.0, atol=tol):
+        raise ValueError("State is not a computational basis state")
+    n = int(np.log2(vec.shape[0]))
+    return format(idx, f"0{n}b")
+
+def permutation_unitary(mapping, n):
+    dim = 2**n
+    U = np.zeros((dim, dim), dtype=complex)
+    for k, v in mapping.items():
+        i = int(k, 2)
+        j = int(v, 2)
+        U[j, i] = 1.0
+    return U
 
 def electric_field_values(ground_vec, lattice):
     electric_field_values_dict = {}
@@ -113,6 +124,18 @@ def observe_and_print(ground_vec, lattice):
     print("total_charge:",_total_charge)
     print("total_gauss (with charges):",_total_gauss_law)
     print("total_particle_number:",_total_particle_number)
+
+    results_dict = {
+        'electric_field_dict' : electric_field_values_dict,
+        'magnetic_field_dict' : magnetic_field_values_dict,
+        'particle_number_dict' : particle_number_value_dict,
+        'gauss_law_dict' : gauss_law_values_dict,
+        'total_charge' : _total_charge,
+        'gauss_law_total' : _total_gauss_law,
+        'particle_number_total' : _total_particle_number
+        }    
+
+    return results_dict
     
 def electric_field_values_sparse(ground_vec, lattice):
     electric_field_values_dict = {}
@@ -229,7 +252,17 @@ def observe_and_print_sparse(ground_vec, lattice):
     print("total_gauss (with charges):", _total_gauss_law)
     print("total_particle_number:", _total_particle_number)
     
-    return _total_particle_number
+    results_dict = {
+        'electric_field_dict' : electric_field_values_dict,
+        'magnetic_field_dict' : magnetic_field_values_dict,
+        'particle_number_dict' : particle_number_value_dict,
+        'gauss_law_dict' : gauss_law_values_dict,
+        'total_charge' : _total_charge,
+        'gauss_law_total' : _total_gauss_law,
+        'particle_number_total' : _total_particle_number
+        }    
+
+    return results_dict
     
 def electric_field_values_circuit(thetas, thetas_values, circuit, lattice, measurer, shots):
     electric_field_values_dict = {}
@@ -338,7 +371,17 @@ def observe_and_print_circuit(thetas, thetas_values, circuit, lattice, measurer,
     print("total_gauss (with charges):", _total_gauss_law)
     print("total_particle_number:", _total_particle_number)
     
-    return _total_particle_number
+    results_dict = {
+        'electric_field_dict' : electric_field_values_dict,
+        'magnetic_field_dict' : magnetic_field_values_dict,
+        'particle_number_dict' : particle_number_value_dict,
+        'gauss_law_dict' : gauss_law_values_dict,
+        'total_charge' : _total_charge,
+        'gauss_law_total' : _total_gauss_law,
+        'particle_number_total' : _total_particle_number
+        }    
+
+    return results_dict
     
 def _statevector_from_params(thetas, thetas_values, circuit):
     param_dict = dict(zip(thetas, thetas_values))
@@ -449,7 +492,17 @@ def observe_and_print_noiseless(thetas, thetas_values, circuit, lattice):
     print("total_gauss (with charges):", total_gauss)
     print("total_particle_number:", total_pn)
 
-    return total_pn
+    results_dict = {
+        'electric_field_dict' : ef,
+        'magnetic_field_dict' : mf,
+        'particle_number_dict' : pn,
+        'gauss_law_dict' : gl,
+        'total_charge' : total_charge,
+        'gauss_law_total' : total_gauss,
+        'particle_number_total' : total_pn
+        }    
+
+    return results_dict
 
 def initiate_circuit_observables(parameters, lattice):
     measurer = Measurements_gpu(parameters['simulator'])
@@ -464,7 +517,7 @@ def initiate_circuit_observables(parameters, lattice):
                         
     n_gauge_thetas = thetas_per_gauge[lattice.qubits_per_gauge] * lattice.n_dynamical_links
     n_fermion_thetas = n_slice * parameters['n_fermion_layers']
-    n_extra_thetas = lattice.n_gauge_qubits * parameters['n_extra_layers']
+    n_extra_thetas = lattice.n_fermion_qubits
     
     total_thetas = n_fermion_thetas + n_gauge_thetas + n_extra_thetas
     thetas = qiskit.circuit.ParameterVector('θ', total_thetas)
@@ -477,8 +530,8 @@ def initiate_circuit_observables(parameters, lattice):
         
     builder.gauge_block(gauge_thetas, parameters['gauge_truncation'])
     
-    for j in range(parameters['n_extra_layers']):
-        builder.R_Y_layer_gauss(extra_thetas[lattice.n_gauge_qubits*j:lattice.n_gauge_qubits*(j+1)])
+    for j in range(lattice.n_fermion_qubits):
+        builder.circuit.rz(extra_thetas[j], lattice.n_gauge_qubits + j)
         
     circuit = builder.build()
     # print(circuit.draw())
