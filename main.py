@@ -13,7 +13,7 @@ from my_spsa import *
 parameters = {
     'L_x': 3,
     'L_y': 2,
-    'gauge_truncation': 3,
+    'gauge_truncation': 1,
     'n_fermion_layers': 2,
     'n_extra_layers': 0,
     'shots': 10000,
@@ -21,7 +21,7 @@ parameters = {
     'g': 0.3,
     'a': 1.0,
     'E_0': [0.0, 0.0],
-    'dynamical_links': [((1,0),2), ((2,0),2)],
+    'dynamical_links': [((1,0), 2), ((2,0), 2)],
     'gauss_weight': 0.0, # Enforces Gauss' law
     'charge_weight': 0.0,
     'simulator': CPU_NOISELESS_SIMULATOR 
@@ -46,24 +46,52 @@ SPSA_parameters = {
     'diagnostics' : False
     }
 
-print("RUNNING PLAYGROUND")
+print("RUNNING TEST")
+print("parameters:")
+for key in list(parameters):
+    print(key,":",parameters[key])
 
-def Es_function_pg(qubits_per_gauge):
-    I_string_list = list('I' * qubits_per_gauge)
-    coeff = -0.5
-    Es = {}
+for key in list(extra_parameters):
+    print(key,":",extra_parameters[key])
     
-    for k in range(qubits_per_gauge - 1):
-        temp_string = copy.copy(I_string_list)
-        temp_string[k] = 'Z'
-        Es["".join(temp_string)] = coeff * 2**(k)
-        
-    first_string = copy.copy(I_string_list)    
-    first_string[qubits_per_gauge - 1] = 'Z'
-    Es["".join(first_string)] = coeff * (2**(qubits_per_gauge - 1) - 1)
-    return Es
+for key in list(SPSA_parameters):
+    print(key,":",SPSA_parameters[key])
 
-qubits_per_gauge = int(np.ceil(np.log2(2*parameters['gauge_truncation']+1)))
-hamiltonian = Hamiltonian(qubits_per_gauge)
-hamiltonian.hamiltonian = Es_function_pg(parameters['gauge_truncation'])
-print(hamiltonian.to_matrix())
+parameters['g'] = 0.3
+gs = []
+V = []
+V_nogauss = []
+
+lattice = Lattice(parameters['L_x'], parameters['L_y'], parameters['gauge_truncation'], parameters['dynamical_links'], charge_site = (0,0), anticharge_site = (2,1), E_0 = [0.0, 0.0])
+
+for g in np.linspace(0.3, 3.0, 12):
+    print("-"*10)
+    parameters['g'] = g
+    print("g =",g)
+    circuit, thetas, total_thetas, n_fermion_thetas = initiate_circuit_observables_match_paper(parameters, lattice)
+    measurer = Measurements_gpu(parameters['simulator'], lattice.n_qubits)
+    
+    hamiltonian = generate_qed_hamiltonian(parameters, lattice)
+    guess = np.array([np.random.uniform(-0.08, 0.08) for _ in range(total_thetas)])
+    
+    def cost_function_qed(thetas_values):
+        if extra_parameters['noisy']:
+            cost = qed_vqe(thetas, thetas_values, circuit, hamiltonian, lattice, measurer, parameters['shots'])
+        else:
+            cost = qed_vqe_noiseless(thetas, thetas_values, circuit, hamiltonian, lattice, measurer, parameters['shots'])
+        return cost
+    
+    results = NG_SPSA(cost_function_qed, guess, SPSA_parameters)
+    
+    best_thetas = results['final_paras']
+
+    observes = observe_and_print_noiseless(thetas, best_thetas, circuit, lattice)
+    
+    final_energy = results['final_cost']
+    print("Final cost:", final_energy)
+    
+    gs.append(g)
+    V.append(final_energy)
+    
+print("gs=",gs)
+print("V=",V)

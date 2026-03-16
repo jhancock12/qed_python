@@ -32,6 +32,8 @@ def electric_field_quadratic_term_n_direction(hamiltonian, lattice, n, direction
             term = gauge_before + key + gauge_after + fermion_string
             coeff = lattice.E_dict[key]
             hamiltonian.add_term(term, coeff)
+        hamiltonian.add_term('I'*lattice.n_qubits, lattice.E_0[direction - 1])
+        hamiltonian.add_term('I'*lattice.n_qubits, lattice.gauss_law_background[(index, direction)])
     else:
         hamiltonian.add_term('I'*lattice.n_qubits, 0)
     hamiltonian.multiply_hamiltonians(hamiltonian)
@@ -286,6 +288,62 @@ def gauss_operator_n(lattice, n):
     G.cleanup()
     
     return G
+    
+def gauss_operator_n_full(lattice, n):
+    G = Hamiltonian(lattice.n_qubits)
+    indices = lattice.labels[n]
+    x, y = indices
+
+    # dynamical electric field part
+    for direction in [1, 2]:
+        # outgoing
+        if direction in lattice.directions[n]:
+            G_on = Hamiltonian(lattice.n_qubits)
+            G_on = electric_field_linear_term_n_direction(
+                G_on, lattice, n, direction, lattice.dynamical_links_list
+            )
+            G_on.hamiltonian = multiply_hamiltonian_by_constant(G_on.hamiltonian, -1.0)
+            G.add_hamiltonians(G_on)
+
+        # incoming
+        if direction == 1:
+            new_indices = (x - 1, y)
+        else:
+            new_indices = (x, y - 1)
+
+        if new_indices in lattice.reverse_labels:
+            G_in = Hamiltonian(lattice.n_qubits)
+            new_n = lattice.reverse_labels[new_indices]
+            G_in = electric_field_linear_term_n_direction(
+                G_in, lattice, new_n, direction, lattice.dynamical_links_list
+            )
+            G.add_hamiltonians(G_in)
+
+    # background string contribution
+    for direction in [1, 2]:
+        link_out = ((x, y), direction)
+        if link_out in lattice.gauss_law_background:
+            G.add_term('I' * lattice.n_qubits, -lattice.gauss_law_background[link_out])
+
+        if direction == 1:
+            link_in = ((x - 1, y), 1)
+        else:
+            link_in = ((x, y - 1), 2)
+
+        if link_in in lattice.gauss_law_background:
+            G.add_term('I' * lattice.n_qubits, +lattice.gauss_law_background[link_in])
+
+    # uniform boundary field
+    rho = boundary_flux_at_site(lattice, indices)
+    G.add_term('I' * lattice.n_qubits, -rho)
+
+    # dynamical staggered charge
+    Q = charge_n_hamiltonian(lattice, indices)
+    Q.hamiltonian = multiply_hamiltonian_by_constant(Q.hamiltonian, -1.0)
+    G.add_hamiltonians(Q)
+
+    G.cleanup()
+    return G
 
 def gauss_hamiltonian(lattice):
     H = Hamiltonian(lattice.n_qubits)
@@ -401,35 +459,7 @@ def generate_qed_hamiltonian(parameters, lattice, to_print = False, mass_multi =
     kinetic_hamiltonian_total.hamiltonian = multiply_hamiltonian_by_constant(kinetic_hamiltonian_total.hamiltonian, kinetic_coeff)
     kinetic_hamiltonian_total.cleanup()
     # =======================================================================================================================
-    # print("Kin. done")
-    # =======================================================================================================================
-    # Background electric field term
-    for n in range(lattice.n_fermion_qubits):
-        for direction in lattice.E_0_directions:
-            background_electric_hamiltonian = Hamiltonian(lattice.n_qubits)
-            background_electric_hamiltonian = electric_field_linear_term_n_direction(background_electric_hamiltonian, lattice, n, direction, lattice.dynamical_links_list)
-            background_electric_hamiltonian.hamiltonian = multiply_hamiltonian_by_constant(background_electric_hamiltonian.hamiltonian, electric_coeff*2*lattice.E_0[direction - 1])
-            BEF_hamiltonian_total.add_term('I'*lattice.n_qubits, electric_coeff*lattice.E_0[direction - 1]*lattice.E_0[direction - 1])
-            BEF_hamiltonian_total.add_hamiltonians(background_electric_hamiltonian) 
-
-    BEF_hamiltonian_total.cleanup()
-    # =======================================================================================================================
-    # print("BEF done")
-    # =======================================================================================================================
-    # Gauss' law electric field term
-    print("lattice.gauss_law_background:",lattice.gauss_law_background)
-    for link in list(lattice.gauss_law_background):
-        n = lattice.reverse_labels[link[0]]
-        direction = link[1]
-        background_electric_hamiltonian = Hamiltonian(lattice.n_qubits)
-        background_electric_hamiltonian = electric_field_linear_term_n_direction(background_electric_hamiltonian, lattice, n, direction, lattice.dynamical_links_list)
-        background_electric_hamiltonian.hamiltonian = multiply_hamiltonian_by_constant(background_electric_hamiltonian.hamiltonian, electric_coeff*2*lattice.gauss_law_background[link])
-        GL_hamiltonian_total.add_term('I'*lattice.n_qubits, electric_coeff*lattice.gauss_law_background[link]*lattice.gauss_law_background[link])
-        GL_hamiltonian_total.add_hamiltonians(background_electric_hamiltonian) 
-
-    GL_hamiltonian_total.cleanup()
-    # =======================================================================================================================
-    
+    # print("Kin. done")   
 
     full_hamiltonian.add_hamiltonians(mass_hamiltonian_total)
     full_hamiltonian.add_hamiltonians(electric_hamiltonian_total)
@@ -437,15 +467,6 @@ def generate_qed_hamiltonian(parameters, lattice, to_print = False, mass_multi =
     full_hamiltonian.add_hamiltonians(kinetic_hamiltonian_total)
     full_hamiltonian.add_hamiltonians(BEF_hamiltonian_total)
     full_hamiltonian.add_hamiltonians(GL_hamiltonian_total)
-
-    # Charge penalty term
-    _gauss_hamiltonian = gauss_hamiltonian(lattice)
-    _gauss_hamiltonian.hamiltonian = multiply_hamiltonian_by_constant(_gauss_hamiltonian.hamiltonian, parameters['gauss_weight'])
-    _charge_hamiltonian = charge_total_hamiltonian_quadratic(lattice)
-    _charge_hamiltonian.hamiltonian = multiply_hamiltonian_by_constant(_charge_hamiltonian.hamiltonian, parameters['charge_weight'])
-    
-    full_hamiltonian.add_hamiltonians(_charge_hamiltonian)
-    full_hamiltonian.add_hamiltonians(_gauss_hamiltonian)
     
     # Prints
     if to_print:

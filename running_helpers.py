@@ -396,7 +396,7 @@ def electric_field_values_noiseless(thetas, thetas_values, circuit, lattice):
     for n in range(lattice.n_fermion_qubits):
         for direction in lattice.directions[n]:
             H = Hamiltonian(lattice.n_qubits)
-            H = electric_field_quadratic_term_n_direction(
+            H = electric_field_linear_term_n_direction(
                 H, lattice, n, direction, lattice.dynamical_links_list
             )
             values[(lattice.labels[n], direction)] = np.real(
@@ -453,7 +453,7 @@ def gauss_law_values_noiseless(thetas, thetas_values, circuit, lattice):
     for x in range(lattice.L_x):
         for y in range(lattice.L_y):
             n = lattice.reverse_labels[(x, y)]
-            H = gauss_operator_n(lattice, n)
+            H = gauss_operator_n_full(lattice, n)
             values[(x, y)] = np.real(
                 psi.expectation_value(H.to_qiskit())
             )
@@ -464,6 +464,8 @@ def total_gauss_law_noiseless(thetas, thetas_values, circuit, lattice):
     psi = _statevector_from_params(thetas, thetas_values, circuit)
     H = gauss_hamiltonian_linear(lattice)
     return np.real(psi.expectation_value(H.to_qiskit()))
+    
+
 
 def observe_and_print_noiseless(thetas, thetas_values, circuit, lattice):
     ef = electric_field_values_noiseless(thetas, thetas_values, circuit, lattice)
@@ -500,7 +502,57 @@ def observe_and_print_noiseless(thetas, thetas_values, circuit, lattice):
         'total_charge' : total_charge,
         'gauss_law_total' : total_gauss,
         'particle_number_total' : total_pn
-        }    
+        }
+    # ======================================================
+    # Gauss law divergence check
+    # ======================================================
+    
+    divergence_dict = {}
+    
+    for x in range(lattice.L_x):
+        for y in range(lattice.L_y):
+    
+            divergence = 0.0
+    
+            # outgoing
+            for direction in [1,2]:
+    
+                link = ((x,y), direction)
+    
+                if link in ef:
+                    divergence += ef[link]
+    
+                if link in lattice.gauss_law_background:
+                    divergence += lattice.gauss_law_background[link]
+    
+            # incoming x
+            if (x-1, y) in lattice.reverse_labels:
+    
+                link = ((x-1,y),1)
+    
+                if link in ef:
+                    divergence -= ef[link]
+    
+                if link in lattice.gauss_law_background:
+                    divergence -= lattice.gauss_law_background[link]
+    
+            # incoming y
+            if (x, y-1) in lattice.reverse_labels:
+    
+                link = ((x,y-1),2)
+    
+                if link in ef:
+                    divergence -= ef[link]
+    
+                if link in lattice.gauss_law_background:
+                    divergence -= lattice.gauss_law_background[link]
+    
+            divergence_dict[(x,y)] = divergence
+    
+    
+    divergence_dict = smart_round(divergence_dict,6)
+    
+    print("gauss_law_divergence_dict:", divergence_dict)
 
     return results_dict
 
@@ -535,6 +587,62 @@ def initiate_circuit_observables(parameters, lattice):
         
     circuit = builder.build()
     # print(circuit.draw())
+    
+    return circuit, thetas, total_thetas, n_fermion_thetas
+
+def initiate_circuit_observables_match_paper(parameters, lattice):
+    measurer = Measurements_gpu(parameters['simulator'])
+    builder = CircuitBuilder(lattice.n_fermion_qubits, lattice.n_dynamical_gauge_qubits)
+    
+    builder.initialize_fermions(lattice)
+    
+    n_slice = builder.iSwap_block_calculate_qed(lattice, parameters['n_fermion_layers'])
+    
+    thetas_per_gauge = {2: 2, 
+                        3: 4}
+                        
+    n_gauge_thetas = thetas_per_gauge[lattice.qubits_per_gauge] * lattice.n_dynamical_links + 4
+    n_fermion_thetas = n_slice * parameters['n_fermion_layers'] + 4
+    n_extra_thetas = lattice.n_fermion_qubits
+
+    def controlled_iSwap(circuit, theta, ctrl, j, k):
+        sub = qiskit.QuantumCircuit(2)
+        sub.ryy((theta/2), 0, 1)
+        sub.rxx((theta/2), 0, 1)
+
+        gate = sub.to_gate(label="iSwap")
+        cgate = gate.control(1)
+
+        circuit.append(cgate, [ctrl, j, k])
+    
+    total_thetas = n_fermion_thetas + n_gauge_thetas + n_extra_thetas
+    thetas = qiskit.circuit.ParameterVector('θ', total_thetas)
+    fermion_thetas = thetas[:n_fermion_thetas]
+    gauge_thetas = thetas[n_fermion_thetas:n_fermion_thetas + n_gauge_thetas]
+    extra_thetas = thetas[n_fermion_thetas + n_gauge_thetas:]
+    
+    for j in range(parameters['n_fermion_layers']):
+        builder.iSwap_block_qed(fermion_thetas[n_slice*j:n_slice*(j+1)], lattice)
+        
+    builder.circuit.ry(gauge_thetas[0], 0)
+    builder.circuit.ry(gauge_thetas[2], 2)
+    builder.circuit.cry(gauge_thetas[1], 0, 1)
+    builder.circuit.cry(gauge_thetas[3], 0, 2)
+    builder.circuit.cry(gauge_thetas[4], 1, 2)
+    builder.circuit.cry(gauge_thetas[5], 2, 3)
+    builder.circuit.mcry(gauge_thetas[6], [0, 2], 3)
+    builder.circuit.mcry(gauge_thetas[7], [1, 2], 3)
+    
+    controlled_iSwap(builder.circuit, fermion_thetas[-1], 0, lattice.reverse_labels[(1,0)] + lattice.n_gauge_qubits, lattice.reverse_labels[(1,1)] + lattice.n_gauge_qubits)
+    controlled_iSwap(builder.circuit, fermion_thetas[-2], 1, lattice.reverse_labels[(1,0)] + lattice.n_gauge_qubits, lattice.reverse_labels[(1,1)] + lattice.n_gauge_qubits)
+    controlled_iSwap(builder.circuit, fermion_thetas[-3], 2, lattice.reverse_labels[(2,0)] + lattice.n_gauge_qubits, lattice.reverse_labels[(2,1)] + lattice.n_gauge_qubits)
+    controlled_iSwap(builder.circuit, fermion_thetas[-4], 3, lattice.reverse_labels[(2,0)] + lattice.n_gauge_qubits, lattice.reverse_labels[(2,1)] + lattice.n_gauge_qubits)
+
+    for j in range(lattice.n_fermion_qubits):
+        builder.circuit.rz(extra_thetas[j], lattice.n_gauge_qubits + j)
+        
+    circuit = builder.build()
+    # circuit.draw(output="mpl", filename="circuit.pdf")
     
     return circuit, thetas, total_thetas, n_fermion_thetas
     
