@@ -89,9 +89,9 @@ def NG_SPSA(cost_function, guess, SPSA_parameters):
     avg_tol = SPSA_parameters['average_tol']
 
     # --- Natural gradient parameters ---
-    beta = 0.9                             
+    beta = 0.95                             
     F_diag = np.ones(n_paras)               
-    lambda_reg = 1e-4                       
+    lambda_reg = 1e-2                       
 
     stop_reason = None
     iteration = 1

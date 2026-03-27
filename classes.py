@@ -134,101 +134,6 @@ def Es_function(qubits_per_gauge):
     Es["".join(first_string)] = coeff * (2**(qubits_per_gauge - 1) - 1)
     return Es
     
-def compute_background_electric_field(lattice):
-    n_sites = lattice.n_fermion_qubits
-    n_dyn_links = len(lattice.dynamical_links_list)
-
-    # Build A: rows = sites, columns = dynamical links
-    A = np.zeros((n_sites, n_dyn_links))
-    rho = np.zeros(n_sites)
-
-    # Assign charges
-    if lattice.charge_site:
-        rho[lattice.get_index(*lattice.charge_site)] = 1
-    if lattice.anticharge_site:
-        rho[lattice.get_index(*lattice.anticharge_site)] = -1
-
-    # Map links to columns
-    link_to_col = {link: i for i, link in enumerate(lattice.dynamical_links_list)}
-
-    for site_idx in range(n_sites):
-        site = lattice.get_indices(site_idx)
-        x, y = site
-        for direction in [1, 2]:  # 1 = x, 2 = y
-            # Outgoing link
-            link = (site, direction)
-            if link in link_to_col:
-                A[site_idx, link_to_col[link]] += 1
-
-            # Ingoing link (check bounds!)
-            if direction == 1 and x > 0:  # x-direction ingoing
-                neighbor_link = ((x-1, y), 1)
-                if neighbor_link in link_to_col:
-                    A[site_idx, link_to_col[neighbor_link]] -= 1
-            elif direction == 2 and y > 0:  # y-direction ingoing
-                neighbor_link = ((x, y-1), 2)
-                if neighbor_link in link_to_col:
-                    A[site_idx, link_to_col[neighbor_link]] -= 1
-
-    # Solve linear system, minimal norm solution
-    E_dyn = np.linalg.lstsq(A, rho, rcond=None)[0]
-
-    # Fill lattice.gauss_law_background
-    gauss_law_background = {link: E_dyn[i] for link, i in link_to_col.items()}
-
-    return gauss_law_background
-
-def compute_string_background(lattice):
-    """
-    Compute a background electric field forming a string between
-    the static charge and anticharge, restricted to allowed dynamical links.
-    """
-    E_bg = {link: 0.0 for link in lattice.dynamical_links_list}
-
-    # Example: naive Manhattan path from charge to anticharge
-    charge = lattice.charge_site
-    anticharge = lattice.anticharge_site
-    x0, y0 = charge
-    x1, y1 = anticharge
-
-    path_links = []
-
-    # move in x first
-    x = x0
-    while x != x1:
-        dx = 1 if x1 > x else -1
-        next_site = (x+dx, y0)
-        # check if vertical or horizontal link is dynamical
-        link_h = ((x, y0), 1)  # horizontal link
-        link_v = ((x, y0), 2)  # vertical link
-        # pick dynamical link along the path if exists
-        if link_h in lattice.dynamical_links_list:
-            path_links.append(link_h)
-        elif link_v in lattice.dynamical_links_list:
-            path_links.append(link_v)
-        x += dx
-
-    # move in y next
-    y = y0
-    while y != y1:
-        dy = 1 if y1 > y else -1
-        next_site = (x1, y+dy)
-        link_h = ((x1, y), 1)
-        link_v = ((x1, y), 2)
-        if link_v in lattice.dynamical_links_list:
-            path_links.append(link_v)
-        elif link_h in lattice.dynamical_links_list:
-            path_links.append(link_h)
-        y += dy
-
-    # assign +1 along the path
-    for link in path_links:
-        if link in E_bg:
-            E_bg[link] = 1.0
-
-    return E_bg
-
-
 class Lattice:
     def __init__(self, L_x, L_y, gauge_truncation, dynamical_links_list, charge_site = (), anticharge_site = (), E_0 = [0.0, 0.0]):
         if L_x*L_y % 2 == 1:
@@ -261,6 +166,8 @@ class Lattice:
             self.dynamical_links_list = []
         else:
             self.dynamical_links_list = dynamical_links_list
+
+        self.links_list = possible_links(self)
         
         self.n_links = (self.L_x - 1) * self.L_y + self.L_x * (self.L_y - 1) # OBC 
         self.qubits_per_gauge = 0 if gauge_truncation == 0 else int(np.ceil(np.log2(2*gauge_truncation+1)))
@@ -293,7 +200,7 @@ class Lattice:
                     ingoing_links[n].append(direction)
         self.directions_ingoing = ingoing_links
         
-        self.gauss_law_background = compute_string_background(self)
+        self.gauss_equations = gauss_solver(self)
 
     def get_index(self, x, y):
         if (x, y) in self.reverse_labels:
@@ -498,6 +405,41 @@ class Hamiltonian:
     
         return qiskit.quantum_info.SparsePauliOp(paulis, coeffs)
 
+
+def fermion_configuration_from_background(lattice):
+
+    occ = {}
+
+    for x in range(lattice.L_x):
+        for y in range(lattice.L_y):
+
+            div = 0.0
+
+            # outgoing
+            for direction in [1,2]:
+                link = ((x,y),direction)
+                div += lattice.gauss_law_background.get(link,0.0)
+
+            # incoming x
+            if (x-1,y) in lattice.reverse_labels:
+                link = ((x-1,y),1)
+                div -= lattice.gauss_law_background.get(link,0.0)
+
+            # incoming y
+            if (x,y-1) in lattice.reverse_labels:
+                link = ((x,y-1),2)
+                div -= lattice.gauss_law_background.get(link,0.0)
+
+            Q = div
+            n = Q + 0.5
+
+            # round to nearest basis state
+            n = int(round(n))
+
+            occ[(x,y)] = n
+
+    return occ
+
 class CircuitBuilder:
     def __init__(self, n_fermion_qubits, n_gauge_qubits):
         self.n_fermion_qubits = n_fermion_qubits
@@ -521,14 +463,19 @@ class CircuitBuilder:
         
     def iSwap_block_calculate_qed(self, lattice, n_fermion_layers):
         possible_pairs = []
+
         for i in range(lattice.n_fermion_qubits):
             for j in range(i):
                 if i != j:
                     indices_i = lattice.labels[i]
                     indices_j = lattice.labels[j]
-                    
-                    if ((indices_i[0] + indices_i[1]) % 2) != ((indices_j[0] + indices_j[1]) % 2):
+
+                    dx = abs(indices_i[0] - indices_j[0])
+                    dy = abs(indices_i[1] - indices_j[1])
+
+                    if dx + dy == 1:
                         possible_pairs.append([j,i])
+
         return len(possible_pairs)
 
     def iSwap_block(self,thetas_slice):
@@ -544,14 +491,19 @@ class CircuitBuilder:
         
     def iSwap_block_qed(self, thetas_slice, lattice):
         possible_pairs = []
+
         for i in range(lattice.n_fermion_qubits):
             for j in range(i):
                 if i != j:
                     indices_i = lattice.labels[i]
                     indices_j = lattice.labels[j]
-                    
-                    if ((indices_i[0] + indices_i[1]) % 2) != ((indices_j[0] + indices_j[1]) % 2):
+
+                    dx = abs(indices_i[0] - indices_j[0])
+                    dy = abs(indices_i[1] - indices_j[1])
+
+                    if dx + dy == 1:
                         possible_pairs.append([j,i])
+
         counter = 0
         for pair in possible_pairs:
             self.iSwap(thetas_slice[counter], lattice.n_gauge_qubits+pair[0], lattice.n_gauge_qubits+pair[1])
@@ -626,12 +578,18 @@ class CircuitBuilder:
         return self
 
     def initialize_fermions(self, lattice):
-        for k in range(lattice.n_fermion_qubits):
-            indices = lattice.labels[k]
-            if ((indices[0] + indices[1]) % 2) == 1:
-                self.circuit.x(self.n_gauge_qubits + k)
+
+        for n_x in range(lattice.L_x):
+            for n_y in range(lattice.L_y):
+                if (n_x + n_y) % 2 == 1:
+                    self.circuit.x(lattice.n_gauge_qubits + lattice.reverse_labels[(n_x, n_y)])
+
+    def initialize_gauge(self, lattice):
+
+        for n in range(lattice.n_dynamical_links):
+            self.circuit.x(lattice.qubits_per_gauge * n + 1)
+            # pass
         self.circuit.barrier()
-        return self
     
     def build(self):
         return self.circuit.copy()

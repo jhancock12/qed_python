@@ -12,12 +12,7 @@ import argparse
 import statsmodels.api as sm
 from scipy.sparse.linalg import eigsh
 import itertools
-
-# self.n_dynamical_links = self.n_links - (self.n_fermion_qubits - 1)
-# 2x2 : any one link - [[((0,0),1)], [((0,0),2)], [((1,0),2)], [((0,1),1)]]
-# 3x2 : any two links
-# 3x3 : 
-# For now, I will not generalize, and will use the ones that they used
+import sympy as sp
 
 CPU_NOISELESS_SIMULATOR = qiskit_aer.AerSimulator()
 
@@ -76,3 +71,63 @@ def smart_round(number, dec_places):
         if im == 0.0:
             return float(re)
         return complex(re, im)
+
+def gauss_solver(lattice):     
+    link_variables = []
+    charge_variables = []
+    link_variable_dict = {}
+    reverse_link_variable_dict = {}
+    for k in range(len(lattice.links_list)):
+        n = lattice.reverse_labels[lattice.links_list[k][0]]
+        direction = lattice.links_list[k][1]
+        
+        link_variables.append(sp.symbols(f"E{n}{direction}"))
+        
+        link_variable_dict[lattice.links_list[k]] = link_variables[-1]
+        reverse_link_variable_dict[link_variables[-1]] = lattice.links_list[k]
+        
+    eqs = []
+    dependant_variables = []
+    independant_variables = []
+    for n in range(lattice.n_fermion_qubits):
+        
+        q = sp.symbols(f"q{n}")
+        # dependant_variables.append(q)
+        charge_variables.append(q)
+        G_n = 0
+        site = lattice.labels[n]
+        if site == lattice.charge_site:
+            G_n += 1
+        elif site == lattice.anticharge_site:
+            G_n -= 1
+        for direction in [1,2]:
+            prev_site = list(copy.copy(site))
+            prev_site[direction - 1] -= 1
+            prev_site = tuple(prev_site)
+            if (prev_site, direction) in lattice.links_list:
+                G_n += link_variable_dict[(prev_site, direction)]# + lattice.E_0[direction - 1]
+                
+            if (site, direction) in lattice.links_list:
+                G_n -= link_variable_dict[(site, direction)]# + lattice.E_0[direction - 1]
+            
+                if (site, direction) not in lattice.dynamical_links_list:
+                    dependant_variables.append(link_variable_dict[(site, direction)]) 
+                else:
+                    independant_variables.append(link_variable_dict[(site, direction)]) 
+        G_n -= q
+        eqs.append(G_n)
+        
+    independant_variables += charge_variables
+     
+    sol = sp.solve(eqs[:-1], dependant_variables, dict=True)
+
+    results = {'solution': sol[0], 
+               'dependant_variables': dependant_variables,
+               'independant_variables': independant_variables,
+               'link_variable_dict': link_variable_dict,
+               'reverse_link_variable_dict': reverse_link_variable_dict,
+               'equations': eqs,
+               'link_variables' : link_variables,
+               'charge_variables': charge_variables}
+    
+    return results
