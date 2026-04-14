@@ -1,4 +1,4 @@
-﻿from modules import *
+from modules import *
 from classes import *
 from QED_hamiltonian import *
 
@@ -121,8 +121,6 @@ def initiate_circuit_observables_match_paper(parameters, lattice):
     circuit = builder.build()
     
     return circuit, thetas, total_thetas, n_fermion_thetas
-
-
 
 def _statevector_from_params(thetas, thetas_values, circuit):
     param_dict = dict(zip(thetas, thetas_values))

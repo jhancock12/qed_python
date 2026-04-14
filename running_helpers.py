@@ -17,9 +17,7 @@ def electric_field_values_from_statevector(psi_vec, lattice):
     for n in range(lattice.n_fermion_qubits):
         for direction in lattice.directions[n]:
             H = Hamiltonian(lattice.n_qubits)
-            H = electric_field_linear_term_n_direction(
-                H, lattice, n, direction, lattice.dynamical_links_list
-            )
+            H = electric_field_term_n_direction(H, lattice, n, direction)
             H_sparse = H.to_sparse_matrix()
             values[(lattice.labels[n], direction)] = np.real(np.vdot(psi, H_sparse @ psi))
 
@@ -32,9 +30,7 @@ def electric_field_values_squared_from_statevector(psi_vec, lattice):
     for n in range(lattice.n_fermion_qubits):
         for direction in lattice.directions[n]:
             H = Hamiltonian(lattice.n_qubits)
-            H = electric_field_linear_term_n_direction(
-                H, lattice, n, direction, lattice.dynamical_links_list
-            )
+            H = electric_field_term_n_direction(H, lattice, n, direction)
             H.multiply_hamiltonians(H)
             H_sparse = H.to_sparse_matrix()
             values[(lattice.labels[n], direction)] = np.real(np.vdot(psi, H_sparse @ psi))
@@ -77,8 +73,8 @@ def particle_number_values_from_statevector(psi_vec, lattice):
 
     return values
     
-def observe_and_print_reduced_from_statevector(
-    psi_vec, lattice
+def observes_reduced_from_statevector(
+    psi_vec, lattice, to_print = True
 ):
     gauss_equations = lattice.gauss_equations
     ef = electric_field_values_from_statevector(psi_vec, lattice)
@@ -120,12 +116,12 @@ def observe_and_print_reduced_from_statevector(
     c = smart_round(c, 6)
 
     total_pn = smart_round(total_pn, 6)
-
-    print("electric_field_values_dict:", ef)
-    print("charge_field_values_dict:", c)
-    print("magnetic_field_values_dict:", mf)
-    print("particle_number_value_dict:", pn)
-    print("total_particle_number:", total_pn)
+    if to_print:
+        print("electric_field_values_dict:", ef)
+        print("charge_field_values_dict:", c)
+        print("magnetic_field_values_dict:", mf)
+        print("particle_number_value_dict:", pn)
+        print("total_particle_number:", total_pn)
 
     return {
         'electric_field_dict': ef,
