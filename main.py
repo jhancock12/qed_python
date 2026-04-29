@@ -5,17 +5,17 @@ from QED_hamiltonian import *
 from my_spsa import *
 
 parameters = {
-    'L_x': 3,
+    'L_x': 4,
     'L_y': 2,
     'gauge_truncation': 1,
     'n_fermion_layers': 2,
     'n_extra_layers': 0,
     'shots': 10000,
     'm': 3.0,
-    'g': 1.0,
+    'g': 0.25,
     'a': 1.0,
     'E_0': [0.0, 0.0],
-    'dynamical_links': [((0,0), 1), ((1,0), 2)],
+    'dynamical_links': [((0,0), 1), ((1,0), 2), ((2,0), 2)],
     'gauss_weight': 0.0, # Enforces Gauss' law
     'charge_weight': 10000.0,
     'simulator': CPU_NOISELESS_SIMULATOR,
@@ -33,7 +33,6 @@ SPSA_parameters = {
     'diagnostics' : False
     }
 
-
 def statevector_solver(parameters, lattice):
     hamiltonian = generate_qed_hamiltonian(parameters, lattice)
     H = hamiltonian.to_sparse_matrix()
@@ -46,138 +45,62 @@ def statevector_solver(parameters, lattice):
 
     return E0, psi_vec
 
-gs = [1.0]
-ms = np.linspace(1.0, 5.0, 5)
-E_0s = np.linspace(0.0, 15.0, 60)
-gap = E_0s[1] - E_0s[0]
+gs = [3.0]
+lambdas = np.linspace(0.5, 10.0, 10)
+E_0s = np.linspace(0.0, 20.0, 150)
+
+E_0_mins = [0.0, 1.0, 2.2, 3.0, 4.4, 5.5, 6.2]
+E_0_maxs = [4.0, 5.0, 6.2, 7.0, 8.4, 9.5, 10.2]
+
 peak_total = []
+counter = 0
+E_stars = []
+chi_max_heights_total = []
+for g in gs:
+    parameters['g'] = g
+    print("# g =", parameters['g'])
 
-dynamical_links_sets = [
-    [((0,0), 1), ((1,0), 1)],
-    [((0,0), 1), ((1,0), 2)],
-    [((0,0), 1), ((2,0), 2)],
-    [((0,0), 1), ((1,1), 1)],
-    [((0,0), 2), ((1,0), 1)],
-    [((0,0), 2), ((1,0), 2)],
-    [((0,0), 2), ((2,0), 2)],
-    [((0,0), 2), ((1,1), 1)],
-    [((1,0), 1), ((1,0), 2)],
-    [((1,0), 1), ((0,1), 1)],
-    [((1,0), 2), ((2,0), 2)],
-    [((1,0), 2), ((0,1), 1)],
-    [((1,0), 2), ((1,1), 1)],
-    [((2,0), 2), ((0,1), 1)],
-    [((0,1), 1), ((1,1), 1)]
-]
+    particle_numbers_all = []
+    E_star = []
+    chi_max_heights = []
+    lamk = 0
+    for lam in lambdas:
+        parameters['m'] = lam * (parameters['g'] ** 2)
+        particle_numbers = []
+        # E_0s = np.linspace(E_0_mins[lamk], E_0_maxs[lamk], 100)
+        gap = E_0s[1] - E_0s[0]
+        for e_0 in E_0s:
+            lattice = Lattice(
+                parameters['L_x'],
+                parameters['L_y'],
+                parameters['gauge_truncation'],
+                parameters['dynamical_links'],
+                charge_site=(),
+                anticharge_site=(),
+                E_0=[e_0, e_0]
+            )
 
-for dynamical_links in dynamical_links_sets:
-    print("\n")
-    print("#--- dynamical links:",dynamical_links,"---")
-    print("#--- both-directions ---")
-    peak_total = []
-    parameters['dynamical_links'] = dynamical_links
-    for m in ms:
-        parameters['m'] = m
-        peak_row = []
-        for g in gs:
-            parameters['g'] = g
-            particle_numbers = []
-            for e_0 in E_0s:
-                lattice = Lattice(parameters['L_x'], parameters['L_y'], parameters['gauge_truncation'], parameters['dynamical_links'], charge_site = (), anticharge_site = (), E_0 = [e_0, e_0])
-                val, vec = statevector_solver(parameters, lattice)
-                results = observes_reduced_from_statevector(vec, lattice, to_print = False)
-            
-                particle_number_total = results['particle_number_total']
+            val, vec = statevector_solver(parameters, lattice)
+            results = observes_reduced_from_statevector(vec, lattice, to_print=False)
+
+            particle_number_total = results['particle_number_total']
+            particle_numbers.append(particle_number_total)
+
+        particle_numbers_all.append(particle_numbers)
+        lamk += 1
+        chi = []
+        for k in range(1, len(particle_numbers) - 1):
+            chi.append((particle_numbers[k + 1] - particle_numbers[k - 1]) / (2 * gap))
+        chi_max_loc = np.argmax(np.abs(chi))
+        chi_max_height = np.max(np.abs(chi))
+        E_star.append(E_0s[chi_max_loc + 1])
+        chi_max_heights.append(chi_max_height)
     
-                particle_numbers.append(particle_number_total)
-                # print("g =",g,", m =",m,"E_0 =",e_0,"done!")
-    
-            particle_chi = []
-            E_0s_chi = []
-    
-            for k in range(1, len(particle_numbers) - 1):
-                chi = (particle_numbers[k + 1] - particle_numbers[k - 1]) / (2 * gap)
-                particle_chi.append(chi)
-                E_0s_chi.append(E_0s[k])
-            peak_point = E_0s_chi[np.argmax(particle_chi)]
-    
-            peak_row.append(peak_point)
-    
-            
-        peak_total.append(peak_row)
-    
-    peak_total = list(np.array(peak_total).flatten())
-    
-    print("peak_total_both_small=",peak_total)
-    
-    print("#--- x-directions ---")
-    peak_total = []
-    for m in ms:
-        parameters['m'] = m
-        peak_row = []
-        for g in gs:
-            parameters['g'] = g
-            particle_numbers = []
-            for e_0 in E_0s:
-                lattice = Lattice(parameters['L_x'], parameters['L_y'], parameters['gauge_truncation'], parameters['dynamical_links'], charge_site = (), anticharge_site = (), E_0 = [e_0, 0.0])
-                val, vec = statevector_solver(parameters, lattice)
-                results = observes_reduced_from_statevector(vec, lattice, to_print = False)
-            
-                particle_number_total = results['particle_number_total']
-    
-                particle_numbers.append(particle_number_total)
-                # print("g =",g,", m =",m,"E_0 =",e_0,"done!")
-    
-            particle_chi = []
-            E_0s_chi = []
-    
-            for k in range(1, len(particle_numbers) - 1):
-                chi = (particle_numbers[k + 1] - particle_numbers[k - 1]) / (2 * gap)
-                particle_chi.append(chi)
-                E_0s_chi.append(E_0s[k])
-            peak_point = E_0s_chi[np.argmax(particle_chi)]
-    
-            peak_row.append(peak_point)
-    
-            
-        peak_total.append(peak_row)
-    
-    peak_total = list(np.array(peak_total).flatten())
-    
-    print("peak_total_x_small=",peak_total)
-    
-    print("#--- y-directions ---")
-    peak_total = []
-    for m in ms:
-        parameters['m'] = m
-        peak_row = []
-        for g in gs:
-            parameters['g'] = g
-            particle_numbers = []
-            for e_0 in E_0s:
-                lattice = Lattice(parameters['L_x'], parameters['L_y'], parameters['gauge_truncation'], parameters['dynamical_links'], charge_site = (), anticharge_site = (), E_0 = [0.0, e_0])
-                val, vec = statevector_solver(parameters, lattice)
-                results = observes_reduced_from_statevector(vec, lattice, to_print = False)
-            
-                particle_number_total = results['particle_number_total']
-    
-                particle_numbers.append(particle_number_total)
-                # print("g =",g,", m =",m,"E_0 =",e_0,"done!")
-    
-            particle_chi = []
-            E_0s_chi = []
-    
-            for k in range(1, len(particle_numbers) - 1):
-                chi = (particle_numbers[k + 1] - particle_numbers[k - 1]) / (2 * gap)
-                particle_chi.append(chi)
-                E_0s_chi.append(E_0s[k])
-            peak_point = E_0s_chi[np.argmax(particle_chi)]
-    
-            peak_row.append(peak_point)
-    
-            
-        peak_total.append(peak_row)
-    
-    peak_total = list(np.array(peak_total).flatten())
-    
-    print("peak_total_y_small=",peak_total)
+    print("E_star_"+str(counter)+" =", E_star)
+    print("chi_max_height"+str(counter)+" =",chi_max_heights)
+    chi_max_heights_total.append(chi_max_heights)
+    E_stars.append(E_star)
+    counter += 1
+print("lambdas =",lambdas)
+print("E_stars =",E_stars)
+print("chi_max_heights=",chi_max_heights_total)
